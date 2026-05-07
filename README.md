@@ -2,22 +2,22 @@
 
 **StudyPrep AI** is a data-driven study ecosystem built to help university students manage cognitive load and improve retention. This project was developed as a full-stack proof-of-concept for an AI-enhanced educational tool.
 
-## 🚀 Product Vision
+##  Product Vision
 To transform passive studying into an active, multisensory experience by leveraging Generative AI and data visualization, reducing student burnout through automated planning and progress transparency.
 
-## 🧠 Why "StudyPrep AI"?
+##  Why "StudyPrep AI"?
 Unlike generic "StudyPrep" apps that merely store notes, **StudyPrep AI** focuses on **Active Intelligence**. The "AI" suffix represents:
 1.  **Generative Audio:** Transforming static text into emotive human speech.
 2.  **Autonomous Planning:** Algorithms that analyze your schedule to recommend daily goals.
 3.  **Adaptive Analytics:** Identifying specific knowledge gaps that a human student might overlook.
 
-## 🎨 Design Philosophy: "Calm Design"
+##  Design Philosophy: "Calm Design"
 This application adheres to **Calm Design** principles:
 - **Mobile-First & PWA-Ready:** Engineered for high-stress, on-the-go student environments.
 - **Minimalist Aesthetic:** Uses a "Stone/Neutral" palette to minimize visual fatigue during long study sessions.
 - **Context-Aware UI:** Differentiates interfaces based on the course type (Exam vs. Project).
 
-## 🧠 User Problem & Solution
+##  User Problem & Solution
 | Problem | Product Solution |
 | :--- | :--- |
 | **Cognitive Overload** | Minimalist, "Calm Design" interface reduces visual noise and choice paralysis. |
@@ -25,13 +25,13 @@ This application adheres to **Calm Design** principles:
 | **Passive Reading Fatigue** | **AI-Powered TTS:** Converts text flashcards into high-fidelity "Charon" human-male voices via Gemini 3.1 Flash. |
 | **Lack of Visibility** | Structured performance dashboard tracking mastery trends and knowledge gaps. |
 
-## 🛠 Features (The "What")
+##  Features (The "What")
 - **AI-Driven Study Ecosystem:** Uses Gemini API to generate daily goals and customize study difficulty.
 - **Multisensory Flashcards:** High-performance Text-to-Speech (TTS) using the `@google/genai` SDK with smart fallbacks.
 - **Performance Analytics:** Data visualization dashboard built with Recharts, tracking weekly consistency and topic mastery.
 - **Academic Focus Mode:** A "deep work" timer UI designed to minimize distractions.
 
-## 📸 Product Walkthrough & Ecosystem Dissection
+##  Product Walkthrough & Ecosystem Dissection
 
 ### 1. The Intelligence Hub (Main Dashboard)
 *The central command center for student life.*
@@ -84,7 +84,7 @@ This application adheres to **Calm Design** principles:
 - **Growth Metrics:** Quantifies weekly improvement to provide objective feedback on study effectiveness.
 *(Replace this text with your Analytics Screenshot)*
 
-## 🔗 The API Ecosystem (Technical Integration)
+##  The API Ecosystem (Technical Integration)
 To provide a seamless "one-stop-shop" experience, **StudyPrep AI** leverages a sophisticated API infrastructure:
 
 | API | Core Functionality within StudyPrep AI |
@@ -94,26 +94,26 @@ To provide a seamless "one-stop-shop" experience, **StudyPrep AI** leverages a s
 | **Google Calendar API** | provides real-time task synchronization, exam countdown calculations, and event notifications. |
 | **Firebase Auth/Firestore** | manages secure user sessions and real-time cloud data persistence for courses and logs. |
 
-## 🏗 Data Architecture
+##  Data Architecture
 - **In-App Reader:** Custom PDF/Slide viewer that eliminates the need to leave the app for research.
 - **Professor Learning Engine:** A specialized prompt-engineering layer that takes user-inputted "Exam Styles" and formats them into JSON schemas for the AI to follow.
 - **Cloud-Native Sync:** Every change made (a task completed, a quiz taken) is instantly synced to the Firebase cloud, ensuring data parity across devices.
 
-## 📊 Technical Product Management (The "How")
+##  Technical Product Management (The "How")
 As a Product Manager, I led the technical implementation focusing on:
 - **Architecture:** React (Frontend) + Express (Metadata/Server) + Firebase (Data Persistence).
 - **AI Integration:** Implemented the `gemini-3.1-flash-tts-preview` model for low-latency, emotive speech generation.
 - **API Strategy:** Integrated Google Calendar and Drive for real-time task and file synchronization.
 - **Metric-Driven Design:** Developed a performance tracking suite focused on "Active Days" and "Topic Accuracy" to measure user success.
 
-## 📈 Future Roadmap
+##  Future Roadmap
 - **Mobile Native Conversion:** Porting the PWA-core to React Native for App Store/Play Store distribution.
 - **Social Accountability:** Multiplayer "Study Rooms" using real-time WebSockets.
 - **Predictive Analytics:** ML-based exam readiness scoring.
 
 ---
 
-### 💻 Developer Quick Start
+###  Developer Quick Start
 1. `npm install`
 2. Configure `.env` with `GEMINI_API_KEY` and `GOOGLE_API_KEY`.
 3. `npm run dev`
