@@ -1,0 +1,363 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores student personal and academic information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "firstName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "universityName": { "type": "string" },
+        "courseOfStudy": { "type": "string" },
+        "currentSemester": { "type": "number" },
+        "pastCourses": { "type": "array", "items": { "type": "string" } },
+        "profilePicture": { "type": "string", "description": "Base64 or URL" },
+        "lastSemesterUpdate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "firstName", "email", "universityName", "courseOfStudy", "currentSemester"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "Academic course details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["Exam", "Project"] },
+        "flashcardsCount": { "type": "number" },
+        "lecturesCount": { "type": "number" },
+        "quizQuestionsCount": { "type": "number" },
+        "lastStudied": { "type": "string" },
+        "color": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Past"] }
+      },
+      "required": ["id", "uid", "name", "type", "status"]
+    },
+    "LectureFile": {
+      "title": "Lecture File",
+      "description": "Study materials for a course",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "courseId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "content": { "type": "string" }
+      },
+      "required": ["id", "uid", "courseId", "name"]
+    },
+    "Flashcard": {
+      "title": "Flashcard",
+      "description": "Flashcard for studying",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "courseId": { "type": "string" },
+        "topicId": { "type": "string" },
+        "front": { "type": "string" },
+        "back": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "type": { "type": "string" },
+        "source": { "type": "string" },
+        "topic": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "courseId", "topicId", "front", "back"]
+    },
+    "Topic": {
+      "title": "Topic",
+      "description": "Topic for grouping flashcards",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "courseId": { "type": "string" }
+      },
+      "required": ["id", "uid", "name", "courseId"]
+    },
+    "QuizQuestion": {
+      "title": "Quiz Question",
+      "description": "Question for quiz practice",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "courseId": { "type": "string" },
+        "question": { "type": "string" },
+        "type": { "type": "string" },
+        "topic": { "type": "string" },
+        "suggestedAnswer": { "type": "string" },
+        "source": { "type": "string" }
+      },
+      "required": ["id", "uid", "courseId", "question"]
+    },
+    "ExamQuestion": {
+      "title": "Exam Question",
+      "description": "Question for exam simulation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "courseId": { "type": "string" },
+        "question": { "type": "string" },
+        "type": { "type": "string" },
+        "topic": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "suggestedAnswer": { "type": "string" },
+        "points": { "type": "number" },
+        "source": { "type": "string" }
+      },
+      "required": ["id", "uid", "courseId", "question"]
+    },
+    "ExamSimulation": {
+      "title": "Exam Simulation",
+      "description": "A timed exam session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "courseId": { "type": "string" },
+        "title": { "type": "string" },
+        "durationMinutes": { "type": "number" },
+        "questions": { "type": "array" },
+        "status": { "type": "string" },
+        "currentIndex": { "type": "number" },
+        "startTime": { "type": "number" },
+        "endTime": { "type": "number" },
+        "answers": { "type": "object" },
+        "flaggedQuestions": { "type": "array" }
+      },
+      "required": ["id", "uid", "courseId", "status"]
+    },
+    "CalendarEvent": {
+      "title": "Calendar Event",
+      "description": "Tasks and events in the calendar",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "type": { "type": "string" },
+        "courseId": { "type": "string" },
+        "courseName": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "endDate": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "uid", "title", "date"]
+    },
+    "TimetableEntry": {
+      "title": "Timetable Entry",
+      "description": "A recurring class or lecture in the student's timetable",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseName": { "type": "string" },
+        "courseId": { "type": "string" },
+        "dayOfWeek": { "type": "string", "enum": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] },
+        "startTime": { "type": "string", "description": "HH:mm format" },
+        "endTime": { "type": "string", "description": "HH:mm format" },
+        "location": { "type": "string" },
+        "zoomLink": { "type": "string", "description": "Link for online classes" },
+        "professor": { "type": "string" },
+        "semesterStart": { "type": "string", "format": "date" },
+        "semesterEnd": { "type": "string", "format": "date" }
+      },
+      "required": ["id", "courseName", "dayOfWeek", "startTime", "endTime", "semesterStart", "semesterEnd"]
+    },
+    "AcademicTask": {
+      "title": "Academic Task",
+      "description": "An assignment, project, or deadline for a course",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "courseName": { "type": "string" },
+        "courseId": { "type": "string" },
+        "startDate": { "type": "string", "format": "date" },
+        "dueDate": { "type": "string", "format": "date" },
+        "priority": { "type": "string", "enum": ["High", "Medium", "Low"] },
+        "status": { "type": "string", "enum": ["Not Started", "In Progress", "Completed"] },
+        "notes": { "type": "string" },
+        "subtasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "completed": { "type": "boolean" }
+            },
+            "required": ["id", "title", "completed"]
+          }
+        }
+      },
+      "required": ["id", "title", "dueDate", "priority", "status"]
+    },
+    "ProjectTask": {
+      "title": "Project Task",
+      "description": "A task for a project-based course",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "uid": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date" },
+        "priority": { "type": "string", "enum": ["High", "Medium", "Low"] },
+        "status": { "type": "string", "enum": ["To Do", "In Progress", "Done", "Overdue"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "courseId", "uid", "title", "dueDate", "priority", "status"]
+    },
+    "ProjectMilestone": {
+      "title": "Project Milestone",
+      "description": "A major checkpoint for a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "uid": { "type": "string" },
+        "title": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["Upcoming", "Completed"] }
+      },
+      "required": ["id", "courseId", "uid", "title", "dueDate", "status"]
+    },
+    "ProjectNote": {
+      "title": "Project Note",
+      "description": "Documentation and notes for a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "uid": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "courseId", "uid", "title", "content"]
+    },
+    "ProjectInsight": {
+      "title": "Project Insight",
+      "description": "Professor guidance for a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "uid": { "type": "string" },
+        "content": { "type": "string" },
+        "dateAdded": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "courseId", "uid", "content", "dateAdded"]
+    },
+    "ProfessorInsight": {
+      "title": "Professor Insight",
+      "description": "Critical notes or tips provided by a professor for a course",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseName": { "type": "string" },
+        "courseId": { "type": "string" },
+        "content": { "type": "string" },
+        "dateAdded": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "content", "dateAdded"]
+    },
+    "WeeklySimulation": {
+      "title": "Weekly Simulation",
+      "description": "A scheduled exam simulation for the week",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "courseName": { "type": "string" },
+        "title": { "type": "string" },
+        "durationMinutes": { "type": "number" },
+        "day": { "type": "string" },
+        "time": { "type": "string" },
+        "status": { "type": "string", "enum": ["NotStarted", "InProgress", "Completed"] }
+      },
+      "required": ["id", "courseId", "courseName", "title", "durationMinutes", "day", "time", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "UserProfile",
+      "description": "User profile document"
+    },
+    "/users/{uid}/courses/{courseId}": {
+      "schema": "Course",
+      "description": "User's courses"
+    },
+    "/users/{uid}/files/{fileId}": {
+      "schema": "LectureFile",
+      "description": "User's lecture materials"
+    },
+    "/users/{uid}/flashcards/{cardId}": {
+      "schema": "Flashcard",
+      "description": "User's flashcards"
+    },
+    "/users/{uid}/topics/{topicId}": {
+      "schema": "Topic",
+      "description": "User's study topics"
+    },
+    "/users/{uid}/quiz_questions/{qId}": {
+      "schema": "QuizQuestion",
+      "description": "User's quiz questions"
+    },
+    "/users/{uid}/exam_questions/{qId}": {
+      "schema": "ExamQuestion",
+      "description": "User's exam questions"
+    },
+    "/users/{uid}/exam_simulations/{simId}": {
+      "schema": "ExamSimulation",
+      "description": "User's exam simulations"
+    },
+    "/users/{uid}/weekly_simulations/{simId}": {
+      "schema": "WeeklySimulation",
+      "description": "User's weekly exam simulations"
+    },
+    "/users/{uid}/calendar_events/{eventId}": {
+      "schema": "CalendarEvent",
+      "description": "User's calendar events"
+    },
+    "/users/{uid}/timetable/{entryId}": {
+      "schema": "TimetableEntry",
+      "description": "User's recurring class timetable"
+    },
+    "/users/{uid}/tasks/{taskId}": {
+      "schema": "AcademicTask",
+      "description": "User's assignments and tasks"
+    },
+    "/users/{uid}/insights/{insightId}": {
+      "schema": "ProfessorInsight",
+      "description": "User's professor insights"
+    },
+    "/users/{uid}/project_tasks/{taskId}": {
+      "schema": "ProjectTask",
+      "description": "User's project tasks"
+    },
+    "/users/{uid}/project_milestones/{milestoneId}": {
+      "schema": "ProjectMilestone",
+      "description": "User's project milestones"
+    },
+    "/users/{uid}/project_notes/{noteId}": {
+      "schema": "ProjectNote",
+      "description": "User's project notes"
+    },
+    "/users/{uid}/project_insights/{insightId}": {
+      "schema": "ProjectInsight",
+      "description": "User's project insights"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+587:  return (
+688:  return (
+939:        return (
+959:        return (
+983:        return (
+998:        return (
+1019:        return (
+1040:        return (
+1058:        return (
+1088:  return (
+1284:            return (
+1343:    return () => {
+1427:  return (
+2258:    return (
+2293:              return (
+2477:    return (
+2506:          return (
+2630:    return (
+2723:    return (
+2810:  return (
+3428:    return () => clearInterval(timer);
+3725:    return (
+3794:              return (
+3849:    return (
+4028:                    return (
+4056:  return (
+4859:    return () => clearInterval(timer);
+5138:    return (
+5205:    return (
+5242:    return (
+5284:          return (evalItem && evalItem.score < 60) || diff === 'Hard';
+5289:    return (
+5378:    return (
+5699:  return (
+6099:    return () => {
+6105:    return (
+6120:  return (
+6309:    return () => {
+6317:    return (
+6327:  return (
+6596:  return (
+6847:  return (
+6938:  return (
+7120:  return (
+7358:  return (
+7534:  return (
+7758:    return () => unsubscribe();
+8107:      return (
+8135:    return (
+8388:    return (
+8510:    return () => window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+9671:    return (
+9683:    return (
+9925:  return (
+10060:                  return (
+10235:                    return (

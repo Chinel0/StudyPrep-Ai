@@ -1,0 +1,25 @@
+{
+  "name": "StudyPrep",
+  "short_name": "StudyPrep",
+  "description": "Your ultimate study companion",
+  "start_url": ".",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1c1917",
+  "theme_color": "#1c1917",
+  "icons": [
+    {
+      "src": "https://api.dicebear.com/7.x/bottts/png?seed=study&size=192",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://api.dicebear.com/7.x/bottts/png?seed=study&size=512",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

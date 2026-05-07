@@ -1,0 +1,260 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUserProfile(data) {
+      return data.uid is string && data.uid.size() > 0 &&
+             data.firstName is string && data.firstName.size() > 0 && data.firstName.size() < 100 &&
+             isValidEmail(data.email) &&
+             data.universityName is string && data.universityName.size() > 0 &&
+             data.courseOfStudy is string && data.courseOfStudy.size() > 0 &&
+             data.currentSemester is number && data.currentSemester > 0 &&
+             (data.pastCourses is list || !('pastCourses' in data)) &&
+             (data.profilePicture is string || !('profilePicture' in data)) &&
+             (data.lastSemesterUpdate is string || !('lastSemesterUpdate' in data));
+    }
+
+    function isValidCourse(data) {
+      return data.id is string && data.uid is string && data.uid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.type in ['Exam', 'Project'] &&
+             data.status in ['Active', 'Past'] &&
+             (data.progress is number || !('progress' in data));
+    }
+
+    function isValidTimetableEntry(data) {
+      return data.id is string &&
+             data.courseName is string && data.courseName.size() > 0 && data.courseName.size() < 200 &&
+             data.dayOfWeek in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] &&
+             data.startTime is string && data.startTime.matches("^\\d{1,2}:\\d{2}$") &&
+             data.endTime is string && data.endTime.matches("^\\d{1,2}:\\d{2}$") &&
+             data.semesterStart is string && data.semesterStart.matches("^\\d{4}-\\d{1,2}-\\d{1,2}$") &&
+             data.semesterEnd is string && data.semesterEnd.matches("^\\d{4}-\\d{1,2}-\\d{1,2}$") &&
+             (data.location is string || !('location' in data)) &&
+             (data.zoomLink is string || !('zoomLink' in data)) &&
+             (data.professor is string || !('professor' in data));
+    }
+
+    function isValidSubtask(st) {
+      return (st.id is string || !('id' in st)) &&
+             st.title is string && st.title.size() <= 500 &&
+             st.completed is bool;
+    }
+
+    function isValidAcademicTask(data) {
+      return data.id is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 500 &&
+             data.dueDate is string && data.dueDate.matches("^\\d{4}-\\d{1,2}-\\d{1,2}$") &&
+             data.priority in ['High', 'Medium', 'Low'] &&
+             data.status in ['Not Started', 'In Progress', 'Completed'] &&
+             (data.courseName is string || !('courseName' in data)) &&
+             (data.courseId is string || !('courseId' in data)) &&
+             (!('startDate' in data) || (data.startDate is string && data.startDate.matches("^\\d{4}-\\d{1,2}-\\d{1,2}$"))) &&
+             (data.notes is string || !('notes' in data)) &&
+             (data.subtasks is list || !('subtasks' in data)) &&
+             (!('subtasks' in data) || data.subtasks.all(st, isValidSubtask(st)));
+    }
+
+    function isValidProfessorInsight(data) {
+      return data.id is string &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 5000 &&
+             data.dateAdded is string && data.dateAdded.matches("^\\d{4}-\\d{1,2}-\\d{1,2}T\\d{1,2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function isValidTopic(data) {
+      return hasOnlyAllowedFields(['id', 'uid', 'name', 'courseId']) &&
+             data.id is string &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.courseId is string;
+    }
+
+    function isValidWeeklySimulation(data) {
+      return data.id is string &&
+             data.courseId is string &&
+             data.courseName is string && data.courseName.size() > 0 &&
+             data.title is string && data.title.size() > 0 &&
+             data.durationMinutes is number &&
+             data.day is string &&
+             data.time is string &&
+             data.status in ['NotStarted', 'InProgress', 'Completed'];
+    }
+
+    function isValidProjectTask(data) {
+      return data.id is string &&
+             data.courseId is string &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 500 &&
+             data.dueDate is string && data.dueDate.matches("^\\d{4}-\\d{1,2}-\\d{1,2}$") &&
+             data.priority in ['High', 'Medium', 'Low'] &&
+             data.status in ['To Do', 'In Progress', 'Done', 'Overdue'];
+    }
+
+    function isValidProjectMilestone(data) {
+      return data.id is string &&
+             data.courseId is string &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 500 &&
+             data.dueDate is string && data.dueDate.matches("^\\d{4}-\\d{1,2}-\\d{1,2}$") &&
+             data.status in ['Upcoming', 'Completed'];
+    }
+
+    function isValidProjectNote(data) {
+      return data.id is string &&
+             data.courseId is string &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 500 &&
+             data.content is string;
+    }
+
+    function isValidProjectInsight(data) {
+      return data.id is string &&
+             data.courseId is string &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 5000;
+    }
+
+    // ===============================================================
+    // Routes
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow update: if isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow delete: if false; // Profiles shouldn't be deleted easily
+
+      match /courses/{courseId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidCourse(request.resource.data);
+        allow update: if isOwner(userId) && isValidCourse(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /files/{fileId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /flashcards/{cardId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /topics/{topicId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidTopic(request.resource.data);
+        allow update: if isOwner(userId) && isValidTopic(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /weekly_simulations/{simId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidWeeklySimulation(request.resource.data);
+        allow update: if isOwner(userId) && isValidWeeklySimulation(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /quiz_questions/{qId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /exam_questions/{qId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /exam_simulations/{simId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /calendar_events/{eventId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /timetable/{entryId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidTimetableEntry(request.resource.data);
+        allow update: if isOwner(userId) && isValidTimetableEntry(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /tasks/{taskId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidAcademicTask(request.resource.data);
+        allow update: if isOwner(userId) && isValidAcademicTask(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /insights/{insightId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidProfessorInsight(request.resource.data);
+        allow update: if isOwner(userId) && isValidProfessorInsight(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /project_tasks/{taskId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidProjectTask(request.resource.data);
+        allow update: if isOwner(userId) && isValidProjectTask(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /project_milestones/{milestoneId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidProjectMilestone(request.resource.data);
+        allow update: if isOwner(userId) && isValidProjectMilestone(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /project_notes/{noteId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidProjectNote(request.resource.data);
+        allow update: if isOwner(userId) && isValidProjectNote(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /project_insights/{insightId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidProjectInsight(request.resource.data);
+        allow update: if isOwner(userId) && isValidProjectInsight(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /study_logs/{logId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /evaluations/{evalId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /past_questions/{pqId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /daily_goals/{goalId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+  }
+}
