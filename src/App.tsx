@@ -1772,7 +1772,7 @@ const StudyCalendar: React.FC<StudyCalendarProps> = ({
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
       const model = ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.0-flash",
         contents: `Parse the following academic timeline into a JSON array of tasks. 
 Each task should follow this schema:
 {
@@ -2582,7 +2582,7 @@ ${importText}`,
     setIsDetecting(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const model = "gemini-3-flash-preview";
+      const model = "gemini-2.0-flash";
       const prompt = `Based on these timetable entries, identify the start and end dates of the semester. 
       Timetable: ${JSON.stringify(timetable)}
       Return as JSON: { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" }`;
@@ -3319,7 +3319,7 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.0-flash",
         contents: `Generate ${simulationQuestionCount} exam questions based on this text: "${importText}". 
         Return ONLY a JSON array of objects with these fields: question (string), type ('MultipleChoice' or 'OpenEnded'), topic (string), options (string[] for MultipleChoice, null for OpenEnded), suggestedAnswer (string), points (number), source (string).`,
         config: { responseMimeType: "application/json" }
@@ -3352,7 +3352,7 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
       }
 
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-3-flash-preview";
+      const model = "gemini-2.0-flash";
 
       const filteredLectures = lectureFiles.filter(f => f.courseId === course.id);
       
@@ -3476,7 +3476,7 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
       }
 
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-3-flash-preview";
+      const model = "gemini-2.0-flash";
 
       const evaluations: Record<string, QuizEvaluation> = {};
       let correctCount = 0;
@@ -3620,6 +3620,37 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
             </button>
             <h1 className="text-2xl font-serif italic">Simulation Report</h1>
           </div>
+
+          {/* PASS / FAIL Banner */}
+          <motion.div
+            initial={{ scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+            className={`rounded-[2rem] p-6 flex items-center justify-between border mb-6 ${
+              result.score >= 50
+                ? 'bg-emerald-50 border-emerald-200'
+                : 'bg-red-50 border-red-200'
+            }`}
+          >
+            <div className="flex items-center gap-4">
+              {result.score >= 50 ? (
+                <CheckCircle2 className="w-10 h-10 text-emerald-500" />
+              ) : (
+                <XCircle className="w-10 h-10 text-red-500" />
+              )}
+              <div>
+                <p className={`text-2xl font-black tracking-tight ${result.score >= 50 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  {result.score >= 50 ? 'PASSED' : 'FAILED'}
+                </p>
+                <p className={`text-sm font-medium ${result.score >= 50 ? 'text-emerald-500' : 'text-red-400'}`}>
+                  {result.score >= 50 ? 'Well done — review weak topics to improve' : 'Study the feedback below and try again'}
+                </p>
+              </div>
+            </div>
+            <div className={`text-4xl font-black ${result.score >= 50 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {result.score}%
+            </div>
+          </motion.div>
 
           <div className="bg-white rounded-[2.5rem] p-10 shadow-sm border border-stone-200 mb-8 text-center">
             <div className="w-24 h-24 bg-stone-900 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -4724,6 +4755,21 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
     correct: 0,
     accuracy: 0
   });
+  const [pdfContext, setPdfContext] = useState<{ base64: string; mimeType: string; fileName: string } | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1];
+      setPdfContext({ base64, mimeType: file.type || 'application/pdf', fileName: file.name });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   // Timer logic for Exam mode
   useEffect(() => {
@@ -4819,7 +4865,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
         - feedback (a summary of suggested improvement)`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.0-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -4975,7 +5021,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
       Return as a JSON array of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": string }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.0-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -5472,6 +5518,37 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
+                    {/* PASS / FAIL Banner */}
+                    <motion.div
+                      initial={{ scale: 0.85, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                      className={`rounded-[2rem] p-5 flex items-center justify-between border ${
+                        evaluation.score >= 70
+                          ? 'bg-emerald-50 border-emerald-200'
+                          : 'bg-red-50 border-red-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        {evaluation.score >= 70 ? (
+                          <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+                        ) : (
+                          <XCircle className="w-8 h-8 text-red-500" />
+                        )}
+                        <div>
+                          <p className={`text-xl font-black tracking-tight ${evaluation.score >= 70 ? 'text-emerald-700' : 'text-red-700'}`}>
+                            {evaluation.score >= 70 ? 'PASSED' : 'FAILED'}
+                          </p>
+                          <p className={`text-xs font-medium ${evaluation.score >= 70 ? 'text-emerald-500' : 'text-red-400'}`}>
+                            {evaluation.score >= 70 ? 'Good answer — keep it up' : 'Review the feedback below'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className={`text-3xl font-black ${evaluation.score >= 70 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {evaluation.score}%
+                      </div>
+                    </motion.div>
+
                     <div className="bg-white rounded-[2.5rem] p-10 border border-stone-200 shadow-sm">
                       <div className="flex items-center justify-between mb-10">
                         <div>
@@ -5482,8 +5559,8 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                           <h4 className="text-2xl font-serif italic">Performance Feedback</h4>
                         </div>
                         <div className={`w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold border-4 ${
-                          evaluation.score >= 80 ? 'border-green-100 text-green-600' : 
-                          evaluation.score >= 60 ? 'border-yellow-100 text-yellow-600' : 
+                          evaluation.score >= 80 ? 'border-green-100 text-green-600' :
+                          evaluation.score >= 60 ? 'border-yellow-100 text-yellow-600' :
                           'border-red-100 text-red-600'
                         }`}>
                           {evaluation.score}%
@@ -6159,7 +6236,7 @@ const AudioFlashcardPlayer: React.FC<AudioFlashcardPlayerProps> = ({
       console.log("Initializing Gemini TTS with key:", apiKey.substring(0, 4) + "****");
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-tts-preview", // Updated to correct TTS model to avoid 404
+        model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: text.trim() }] }],
         config: {
           responseModalities: [Modality.AUDIO],
@@ -8196,7 +8273,7 @@ export default function App() {
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.0-flash",
         contents: prompt,
         config: { responseMimeType: "application/json" }
       });
@@ -8945,7 +9022,7 @@ export default function App() {
     setIsGeneratingGoals(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-3-flash-preview";
+      const model = "gemini-2.0-flash";
       
       const prompt = `Based on the following student data, generate 3-5 specific, actionable daily study goals for today.
       Courses: ${courses.map(c => c.name).join(', ')}
@@ -9522,7 +9599,7 @@ export default function App() {
       }
 
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-3-flash-preview";
+      const model = "gemini-2.0-flash";
 
       // Step 1: Analyze
       setGenerationStep("Analyzing lecture materials...");
@@ -12111,7 +12188,7 @@ export default function App() {
                             Text: ${importText}`;
 
                             const response = await ai.models.generateContent({
-                              model: "gemini-3-flash-preview",
+                              model: "gemini-2.0-flash",
                               contents: prompt,
                             });
                             const text = response.text;
