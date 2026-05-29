@@ -196,6 +196,17 @@ interface TimetableEntry {
   semesterEnd: string;
 }
 
+interface ExamTimetableEntry {
+  id: string;
+  courseId?: string;
+  courseName: string;
+  examDate: string;   // 'YYYY-MM-DD'
+  startTime: string;  // 'HH:MM'
+  endTime: string;    // 'HH:MM'
+  location?: string;
+  notes?: string;
+}
+
 interface SubTask {
   id: string;
   title: string;
@@ -4836,14 +4847,18 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
       
       const isCodeQuestion = currentQuestion.type === 'Code' || currentQuestion.type.toLowerCase().includes('code');
       
-      const prompt = isCodeQuestion 
+      const pdfNote = pdfContext
+        ? `\n\nREFERENCE MATERIAL: The student has attached a PDF document ("${pdfContext.fileName}") as study context. Use it as the authoritative source when judging correctness, but do NOT require the student to copy it verbatim — credit correct concepts and logic.`
+        : '';
+
+      const prompt = isCodeQuestion
         ? `Evaluate this student's code answer to the following programming question.
         Question: ${currentQuestion.question}
         Suggested Solution: ${currentQuestion.suggestedAnswer}
-        Student Code: ${currentAnswer}
-        
+        Student Code: ${currentAnswer}${pdfNote}
+
         CRITICAL: Analyze the code for syntax errors, logic issues, missing brackets, or wrong structure.
-        
+
         Provide feedback in JSON format with:
         - score (0-100)
         - correctPoints (array of strings)
@@ -4853,10 +4868,10 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
         : `Evaluate this student's answer to the following question.
         Question: ${currentQuestion.question}
         Suggested Answer: ${currentQuestion.suggestedAnswer}
-        Student Answer: ${currentAnswer}
-        
+        Student Answer: ${currentAnswer}${pdfNote}
+
         CRITICAL: The student's answer does NOT have to be word-for-word. If the student provides the correct LOGIC or CONCEPT, mark it as correct.
-        
+
         Provide feedback in JSON format with:
         - score (0-100)
         - correctPoints (array of strings)
@@ -4864,9 +4879,15 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
         - incorrectPoints (array of strings - specifically things the student got wrong or misconceptions)
         - feedback (a summary of suggested improvement)`;
 
+      const contentParts: any[] = [];
+      if (pdfContext) {
+        contentParts.push({ inlineData: { mimeType: pdfContext.mimeType, data: pdfContext.base64 } });
+      }
+      contentParts.push({ text: prompt });
+
       const response = await ai.models.generateContent({
         model: "gemini-2.0-flash",
-        contents: prompt,
+        contents: [{ parts: contentParts }],
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -5375,6 +5396,37 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                   <h3 className="text-2xl font-serif leading-tight text-stone-900">
                     {currentQuestion.question}
                   </h3>
+                </div>
+
+                {/* PDF Context Attachment */}
+                <div className="flex items-center gap-3">
+                  <input
+                    ref={pdfInputRef}
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    className="hidden"
+                    onChange={handlePdfUpload}
+                  />
+                  {pdfContext ? (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-2xl flex-1">
+                      <FileText className="w-4 h-4 text-blue-500 shrink-0" />
+                      <span className="text-xs font-medium text-blue-700 truncate">{pdfContext.fileName}</span>
+                      <button
+                        onClick={() => setPdfContext(null)}
+                        className="ml-auto p-0.5 text-blue-400 hover:text-blue-700 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => pdfInputRef.current?.click()}
+                      className="flex items-center gap-2 px-4 py-2 bg-stone-50 border border-dashed border-stone-300 rounded-2xl text-xs font-semibold text-stone-500 hover:bg-stone-100 hover:border-stone-400 transition-all"
+                    >
+                      <Upload className="w-4 h-4" />
+                      Attach PDF as context
+                    </button>
+                  )}
                 </div>
 
                 {/* Answer Input */}
@@ -6001,6 +6053,9 @@ const api = {
   getTimetable: (uid: string) => getDocs(collection(db, 'users', uid, 'timetable')).then(s => s.docs.map(d => d.data() as TimetableEntry)).catch(e => { handleFirestoreError(e, OperationType.LIST, `users/${uid}/timetable`); return []; }),
   saveTimetableEntry: (uid: string, entry: TimetableEntry) => setDoc(doc(db, 'users', uid, 'timetable', entry.id), entry).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${uid}/timetable/${entry.id}`)),
   deleteTimetableEntry: (uid: string, id: string) => deleteDoc(doc(db, 'users', uid, 'timetable', id)).catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/timetable/${id}`)),
+  getExamTimetable: (uid: string) => getDocs(collection(db, 'users', uid, 'exam_timetable')).then(s => s.docs.map(d => d.data() as ExamTimetableEntry)).catch(e => { handleFirestoreError(e, OperationType.LIST, `users/${uid}/exam_timetable`); return []; }),
+  saveExamTimetableEntry: (uid: string, entry: ExamTimetableEntry) => setDoc(doc(db, 'users', uid, 'exam_timetable', entry.id), entry).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${uid}/exam_timetable/${entry.id}`)),
+  deleteExamTimetableEntry: (uid: string, id: string) => deleteDoc(doc(db, 'users', uid, 'exam_timetable', id)).catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/exam_timetable/${id}`)),
   
   getTasks: (uid: string) => getDocs(collection(db, 'users', uid, 'tasks')).then(s => s.docs.map(d => d.data() as AcademicTask)).catch(e => { handleFirestoreError(e, OperationType.LIST, `users/${uid}/tasks`); return []; }),
   saveTask: (uid: string, task: AcademicTask) => setDoc(doc(db, 'users', uid, 'tasks', task.id), task).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${uid}/tasks/${task.id}`)),
@@ -8440,6 +8495,9 @@ export default function App() {
   });
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
+  const [examTimetable, setExamTimetable] = useState<ExamTimetableEntry[]>([]);
+  const [isAddingExamDate, setIsAddingExamDate] = useState(false);
+  const [newExamEntry, setNewExamEntry] = useState<Partial<ExamTimetableEntry>>({});
   const [tasks, setTasks] = useState<AcademicTask[]>([]);
   const [insights, setInsights] = useState<ProfessorInsight[]>([]);
   const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([]);
@@ -8741,7 +8799,7 @@ export default function App() {
   useEffect(() => {
     if (user) {
       const fetchData = async () => {
-        const [fetchedCourses, fetchedLogs, fetchedCards, fetchedSims, fetchedTimetable, fetchedTasks, fetchedInsights, fetchedWeeklySims] = await Promise.all([
+        const [fetchedCourses, fetchedLogs, fetchedCards, fetchedSims, fetchedTimetable, fetchedTasks, fetchedInsights, fetchedWeeklySims, fetchedExamTimetable] = await Promise.all([
           api.getCourses(user.uid),
           api.getStudyLogs(user.uid),
           api.getAllFlashcards(user.uid),
@@ -8749,9 +8807,10 @@ export default function App() {
           api.getTimetable(user.uid),
           api.getTasks(user.uid),
           api.getInsights(user.uid),
-          api.getWeeklySimulations(user.uid)
+          api.getWeeklySimulations(user.uid),
+          api.getExamTimetable(user.uid)
         ]);
-        
+
         const coursesArr = (fetchedCourses || []) as Course[];
         const logsArr = (fetchedLogs || []) as StudySessionLog[];
         const cardsArr = (fetchedCards || []) as Flashcard[];
@@ -8760,6 +8819,7 @@ export default function App() {
         const tasksArr = (fetchedTasks || []) as AcademicTask[];
         const insightsArr = (fetchedInsights || []) as ProfessorInsight[];
         const weeklySimsArr = (fetchedWeeklySims || []) as WeeklySimulation[];
+        const examTimetableArr = (fetchedExamTimetable || []) as ExamTimetableEntry[];
 
         if (coursesArr.length > 0) {
           setCourses(coursesArr);
@@ -8771,6 +8831,7 @@ export default function App() {
         setTasks(tasksArr);
         setInsights(insightsArr);
         setWeeklySimulations(weeklySimsArr);
+        setExamTimetable(examTimetableArr);
       };
       fetchData();
     }
@@ -9016,6 +9077,30 @@ export default function App() {
     if (hour < 12) return 'Good morning';
     if (hour < 18) return 'Good afternoon';
     return 'Good evening';
+  };
+
+  const handleSaveExamEntry = async () => {
+    if (!user || !newExamEntry.courseName || !newExamEntry.examDate || !newExamEntry.startTime || !newExamEntry.endTime) return;
+    const entry: ExamTimetableEntry = {
+      id: Math.random().toString(36).substr(2, 9),
+      courseName: newExamEntry.courseName,
+      courseId: newExamEntry.courseId,
+      examDate: newExamEntry.examDate,
+      startTime: newExamEntry.startTime,
+      endTime: newExamEntry.endTime,
+      location: newExamEntry.location,
+      notes: newExamEntry.notes
+    };
+    await api.saveExamTimetableEntry(user.uid, entry);
+    setExamTimetable(prev => [...prev, entry].sort((a, b) => a.examDate.localeCompare(b.examDate)));
+    setNewExamEntry({});
+    setIsAddingExamDate(false);
+  };
+
+  const handleDeleteExamEntry = async (id: string) => {
+    if (!user) return;
+    await api.deleteExamTimetableEntry(user.uid, id);
+    setExamTimetable(prev => prev.filter(e => e.id !== id));
   };
 
   const generateDailyGoals = async () => {
@@ -10407,9 +10492,185 @@ export default function App() {
               </div>
             </section>
 
+            {/* ── Exam Timetable Section ── */}
             <section className="px-6 mt-10">
-              <PerformanceTracker 
-                courses={enrichedCourses} 
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-stone-900">Exam Timetable</h2>
+                <button
+                  onClick={() => setIsAddingExamDate(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-900 text-white rounded-xl text-xs font-bold hover:bg-stone-800 transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Exam
+                </button>
+              </div>
+
+              {/* Add Exam Modal */}
+              <AnimatePresence>
+                {isAddingExamDate && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4"
+                    onClick={() => setIsAddingExamDate(false)}
+                  >
+                    <motion.div
+                      initial={{ y: 60, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      exit={{ y: 60, opacity: 0 }}
+                      onClick={e => e.stopPropagation()}
+                      className="bg-white rounded-[2.5rem] p-8 w-full max-w-md shadow-2xl space-y-5"
+                    >
+                      <h3 className="text-xl font-bold text-stone-900">Add Exam Date</h3>
+
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400 block mb-1.5">Course Name</label>
+                          <input
+                            type="text"
+                            value={newExamEntry.courseName || ''}
+                            onChange={e => setNewExamEntry(p => ({ ...p, courseName: e.target.value }))}
+                            placeholder="e.g. Database Systems"
+                            className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl text-sm focus:ring-2 focus:ring-stone-900 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400 block mb-1.5">Exam Date</label>
+                          <input
+                            type="date"
+                            value={newExamEntry.examDate || ''}
+                            onChange={e => setNewExamEntry(p => ({ ...p, examDate: e.target.value }))}
+                            className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl text-sm focus:ring-2 focus:ring-stone-900 outline-none"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400 block mb-1.5">Start Time</label>
+                            <input
+                              type="time"
+                              value={newExamEntry.startTime || ''}
+                              onChange={e => setNewExamEntry(p => ({ ...p, startTime: e.target.value }))}
+                              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl text-sm focus:ring-2 focus:ring-stone-900 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400 block mb-1.5">End Time</label>
+                            <input
+                              type="time"
+                              value={newExamEntry.endTime || ''}
+                              onChange={e => setNewExamEntry(p => ({ ...p, endTime: e.target.value }))}
+                              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl text-sm focus:ring-2 focus:ring-stone-900 outline-none"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400 block mb-1.5">Location (optional)</label>
+                          <input
+                            type="text"
+                            value={newExamEntry.location || ''}
+                            onChange={e => setNewExamEntry(p => ({ ...p, location: e.target.value }))}
+                            placeholder="e.g. Hall A, Room 201"
+                            className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl text-sm focus:ring-2 focus:ring-stone-900 outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3 pt-2">
+                        <button
+                          onClick={() => { setIsAddingExamDate(false); setNewExamEntry({}); }}
+                          className="flex-1 py-3 bg-stone-100 text-stone-700 rounded-2xl text-sm font-bold hover:bg-stone-200 transition-all"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleSaveExamEntry}
+                          disabled={!newExamEntry.courseName || !newExamEntry.examDate || !newExamEntry.startTime || !newExamEntry.endTime}
+                          className="flex-1 py-3 bg-stone-900 text-white rounded-2xl text-sm font-bold hover:bg-stone-800 disabled:opacity-50 transition-all"
+                        >
+                          Save Exam
+                        </button>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Exam list */}
+              {examTimetable.length === 0 ? (
+                <div className="text-center py-8 bg-stone-50 rounded-3xl border-2 border-dashed border-stone-200">
+                  <GraduationCap className="w-8 h-8 text-stone-300 mx-auto mb-2" />
+                  <p className="text-xs text-stone-400 font-medium">No exams added yet.</p>
+                  <button onClick={() => setIsAddingExamDate(true)} className="mt-2 text-xs font-bold text-stone-900 underline">
+                    Add your first exam
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {examTimetable.map(exam => {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const examDay = new Date(exam.examDate + 'T00:00:00');
+                    const daysLeft = Math.ceil((examDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    const isPast = daysLeft < 0;
+                    const urgency = daysLeft <= 7 ? 'red' : daysLeft <= 14 ? 'amber' : 'emerald';
+                    return (
+                      <motion.div
+                        key={exam.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`group bg-white border rounded-2xl p-4 flex items-center justify-between shadow-sm ${isPast ? 'opacity-50 border-stone-100' : 'border-stone-100 hover:shadow-md transition-all'}`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={`w-12 h-12 rounded-2xl flex flex-col items-center justify-center border text-center ${
+                            isPast ? 'bg-stone-50 border-stone-200 text-stone-400' :
+                            urgency === 'red' ? 'bg-red-50 border-red-200 text-red-600' :
+                            urgency === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-600' :
+                            'bg-emerald-50 border-emerald-200 text-emerald-600'
+                          }`}>
+                            <span className="text-[10px] font-bold uppercase leading-none">
+                              {new Date(exam.examDate + 'T00:00:00').toLocaleString('en', { month: 'short' })}
+                            </span>
+                            <span className="text-lg font-black leading-tight">
+                              {new Date(exam.examDate + 'T00:00:00').getDate()}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-stone-900">{exam.courseName}</p>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <span className="text-xs text-stone-500">{exam.startTime} – {exam.endTime}</span>
+                              {exam.location && <span className="text-xs text-stone-400">· {exam.location}</span>}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {!isPast && (
+                            <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full ${
+                              urgency === 'red' ? 'bg-red-100 text-red-600' :
+                              urgency === 'amber' ? 'bg-amber-100 text-amber-600' :
+                              'bg-emerald-100 text-emerald-600'
+                            }`}>
+                              {daysLeft === 0 ? 'TODAY' : daysLeft === 1 ? '1 day' : `${daysLeft} days`}
+                            </span>
+                          )}
+                          {isPast && <span className="text-[10px] font-bold text-stone-400 uppercase">Done</span>}
+                          <button
+                            onClick={() => handleDeleteExamEntry(exam.id)}
+                            className="opacity-0 group-hover:opacity-100 p-1.5 text-stone-300 hover:text-red-500 transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="px-6 mt-10">
+              <PerformanceTracker
+                courses={enrichedCourses}
                 studyLogs={studyLogs}
                 flashcards={flashcards}
                 evaluations={evaluations}
