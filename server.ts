@@ -1,4 +1,8 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+const __envdir = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: join(__envdir, ".env") });
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";

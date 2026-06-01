@@ -845,6 +845,14 @@ const PerformanceTracker: React.FC<PerformanceTrackerProps> = ({
       return { date: format(parseISO(date), 'MMM dd'), value: Math.round((correctItems / totalItems) * 100) };
     });
 
+    const cutoff7 = Date.now() - 7 * 86400000;
+    const cutoff14 = Date.now() - 14 * 86400000;
+    const recent = courseEvaluations.filter(e => e.timestamp >= cutoff7);
+    const previous = courseEvaluations.filter(e => e.timestamp >= cutoff14 && e.timestamp < cutoff7);
+    const recentAvg = recent.length > 0 ? recent.reduce((a, b) => a + b.score, 0) / recent.length : 0;
+    const prevAvg = previous.length > 0 ? previous.reduce((a, b) => a + b.score, 0) / previous.length : 0;
+    const growth = prevAvg > 0 ? Math.round(((recentAvg - prevAvg) / prevAvg) * 100) : (recentAvg > 0 ? 100 : 0);
+
     let streak = 0;
     const today = new Date().toISOString().split('T')[0];
     const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
@@ -858,15 +866,16 @@ const PerformanceTracker: React.FC<PerformanceTrackerProps> = ({
       }
     }
 
-    return { 
-      studyTimeData, 
-      difficultyData, 
+    return {
+      studyTimeData,
+      difficultyData,
       dailyStudy,
       weakTopics,
       allTopics,
       overallAccuracy,
       accuracyTrendData,
-      streak
+      streak,
+      growth
     };
   };
 
@@ -1092,8 +1101,10 @@ const PerformanceTracker: React.FC<PerformanceTrackerProps> = ({
         </div>
         <div className="text-center">
           <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Growth</p>
-          <p className="text-lg font-bold text-emerald-500">+12%</p>
-          <div className="w-8 h-1 bg-emerald-500 mx-auto rounded-full mt-1" />
+          <p className={`text-lg font-bold ${(realData?.growth ?? 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+            {(realData?.growth ?? 0) >= 0 ? '+' : ''}{realData?.growth ?? 0}%
+          </p>
+          <div className={`w-8 h-1 mx-auto rounded-full mt-1 ${(realData?.growth ?? 0) >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`} />
         </div>
       </div>
 
@@ -4768,6 +4779,15 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
   });
   const [pdfContext, setPdfContext] = useState<{ base64: string; mimeType: string; fileName: string } | null>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  const manualPdfRef = useRef<HTMLInputElement>(null);
+  const [selectedSourceFile, setSelectedSourceFile] = useState<LectureFile | null>(null);
+  const [showAiGenerateOptions, setShowAiGenerateOptions] = useState(false);
+  const [isGeneratingFromFile, setIsGeneratingFromFile] = useState(false);
+  const [manualPdfContext, setManualPdfContext] = useState<{ base64: string; mimeType: string; fileName: string } | null>(null);
+  const [practiceQuestionId, setPracticeQuestionId] = useState<string | null>(null);
+  const [inlineAnswer, setInlineAnswer] = useState('');
+  const [isInlineEvaluating, setIsInlineEvaluating] = useState(false);
+  const [inlineEvaluation, setInlineEvaluation] = useState<QuizEvaluation | null>(null);
 
   const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -4801,14 +4821,22 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
     return () => clearInterval(timer);
   }, [session?.mode, isReviewing, !!session]);
 
-  const startQuiz = (mode: 'Quick' | 'Topic' | 'Exam' | 'Source', filterValue?: string) => {
+  const startQuiz = (mode: 'Quick' | 'All' | 'Topic' | 'Exam' | 'Source', filterValue?: string) => {
     let questions = [...stateQuestions];
     if (questions.length === 0) return;
 
     if (mode === 'Quick') {
       questions = questions.sort(() => 0.5 - Math.random()).slice(0, 5);
+    } else if (mode === 'All') {
+      questions = questions.sort(() => 0.5 - Math.random());
     } else if (mode === 'Exam') {
-      questions = questions.sort(() => 0.5 - Math.random()).slice(0, 15);
+      const sources = [...new Set(questions.map(q => q.source || 'General'))];
+      let examQs: QuizQuestion[] = [];
+      sources.forEach(src => {
+        const pool = questions.filter(q => (q.source || 'General') === src).sort(() => Math.random() - 0.5);
+        examQs.push(...pool.slice(0, 5));
+      });
+      questions = examQs.length > 0 ? examQs.sort(() => Math.random() - 0.5) : questions.sort(() => Math.random() - 0.5).slice(0, 15);
     } else if (mode === 'Topic' && filterValue) {
       questions = questions.filter(q => q.topic === filterValue);
     } else if (mode === 'Source' && filterValue) {
@@ -4820,7 +4848,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
       currentIndex: 0,
       answers: {},
       evaluations: {},
-      mode: mode === 'Source' ? 'Topic' : mode, // Treat Source as Topic mode for UI purposes
+      mode: (mode === 'Source' || mode === 'All') ? 'Quick' : mode,
       startTime: Date.now(),
       timeLeft: mode === 'Exam' ? 25 * 60 : undefined,
       difficulties: {}
@@ -4830,6 +4858,90 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
     setSelectingSource(false);
     setCurrentAnswer('');
     setShowSuggested(false);
+  };
+
+  const handleGenerateFromFile = async (file: LectureFile) => {
+    if (!user || !course) return;
+    setIsGeneratingFromFile(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: `Generate 10 varied quiz questions based on the lecture file "${file.name}" for the course "${course.name}". Create questions covering key concepts, definitions, explanations, and applications from this topic. Return a JSON array with objects: { question, suggestedAnswer, topic, type } where type is one of: Definition, Explanation, Comparison, Code, Calculation, Diagram.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                question: { type: Type.STRING },
+                suggestedAnswer: { type: Type.STRING },
+                topic: { type: Type.STRING },
+                type: { type: Type.STRING, enum: ["Definition", "Explanation", "Comparison", "Code", "Calculation", "Diagram"] }
+              },
+              required: ["question", "suggestedAnswer", "topic", "type"]
+            }
+          }
+        }
+      });
+      const generated = JSON.parse(response.text || '[]');
+      const newQuestions: QuizQuestion[] = generated.map((q: any) => ({
+        id: Math.random().toString(36).substr(2, 9),
+        courseId: course.id,
+        ...q,
+        source: file.name
+      }));
+      if (newQuestions.length > 0) {
+        await Promise.all(newQuestions.map(q => api.saveQuizQuestion(user.uid, q)));
+        onAddQuestions(newQuestions);
+      }
+      setSelectedSourceFile(null);
+      setSelectingSource(false);
+    } catch (err: any) {
+      console.error("Generate from file failed:", err);
+      const msg = err?.message || String(err);
+      alert(`Failed to generate questions.\n\n${msg}`);
+    } finally {
+      setIsGeneratingFromFile(false);
+    }
+  };
+
+  const handleInlineEvaluate = async (question: QuizQuestion) => {
+    if (!inlineAnswer.trim() || !user || !course) return;
+    setIsInlineEvaluating(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: `Evaluate this student's answer.\nQuestion: ${question.question}\nSuggested Answer: ${question.suggestedAnswer}\nStudent Answer: ${inlineAnswer}\n\nIf the student provides the correct logic or concept, mark it correct. Return JSON with: score (0-100), correctPoints (array), missingPoints (array), incorrectPoints (array), feedback (string).`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              score: { type: Type.NUMBER },
+              correctPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+              missingPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+              incorrectPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+              feedback: { type: Type.STRING }
+            },
+            required: ["score", "correctPoints", "missingPoints", "incorrectPoints", "feedback"]
+          }
+        }
+      });
+      const result = JSON.parse(response.text || '{}');
+      setInlineEvaluation({ id: Math.random().toString(36).substr(2,9), courseId: course.id, questionId: question.id, studentAnswer: inlineAnswer, ...result, timestamp: Date.now() });
+      if (result.score >= 70) {
+        setDailyStats(prev => ({ ...prev, practiced: prev.practiced + 1, correct: prev.correct + 1, accuracy: Math.round(((prev.correct + 1) / (prev.practiced + 1)) * 100) }));
+      } else {
+        setDailyStats(prev => ({ ...prev, practiced: prev.practiced + 1, accuracy: Math.round((prev.correct / (prev.practiced + 1)) * 100) }));
+      }
+    } catch (err) {
+      console.error("Inline evaluate failed:", err);
+    } finally {
+      setIsInlineEvaluating(false);
+    }
   };
 
   const handleEvaluate = async () => {
@@ -5023,23 +5135,33 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
   };
 
   const handleManualAdd = async () => {
-    if (!manualInput.trim() || !manualTopic.trim() || !user || !course) return;
-    
+    if ((!manualInput.trim() && !manualPdfContext) || !manualTopic.trim() || !user || !course) return;
+
     setIsParsing(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const prompt = `Parse the following text into a JSON array of quiz questions for the topic "${manualTopic}".
+
+      let contents: any;
+      if (manualPdfContext) {
+        contents = [
+          { text: `Extract all quiz questions and answers from this PDF for the topic "${manualTopic}". If it's a past exam or question bank, extract every question and its answer/solution. Return a JSON array of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": string } where type is one of: Definition, Explanation, Comparison, Code, Calculation, Diagram. Keep questions and answers exactly as in the document.` },
+          { inlineData: { mimeType: manualPdfContext.mimeType, data: manualPdfContext.base64 } }
+        ];
+      } else {
+        contents = `Parse the following text into a JSON array of quiz questions for the topic "${manualTopic}".
       The input format is "q:" for questions and "a:" for answers. There might be multiple questions and answers.
-      
+
       Input Text:
       ${manualInput}
-      
-      CRITICAL: 
+
+      CRITICAL:
       - Keep the questions and answers exactly as provided.
       - Separate each individual question and answer pair.
       - Assign a relevant "type" to each question from: "Definition", "Explanation", "Comparison", "Code", "Calculation", "Diagram".
-      
+
       Return as a JSON array of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": string }`;
+      }
+      const prompt = contents;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.0-flash",
@@ -5067,7 +5189,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
         id: Math.random().toString(36).substr(2, 9),
         courseId: course.id,
         ...q,
-        source: 'Manual Entry'
+        source: manualPdfContext ? manualPdfContext.fileName : 'Manual Entry'
       }));
 
       if (newQuestions.length > 0) {
@@ -5077,6 +5199,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
 
       setManualInput('');
       setManualTopic('');
+      setManualPdfContext(null);
       setIsManualAdding(false);
     } catch (error) {
       console.error("Manual parsing failed:", error);
@@ -5088,63 +5211,91 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
   if (isManualAdding) {
     const topics: string[] = Array.from(new Set(stateQuestions.map(q => q.topic)));
     return (
-      <div className="min-h-screen bg-[#FDFCF8] p-6 font-sans">
+      <div className="min-h-screen bg-[#FDFCF8] p-6 font-sans pb-24">
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center gap-4 mb-8">
-            <button onClick={() => setIsManualAdding(false)} className="p-2 hover:bg-white rounded-full transition-colors">
+            <button onClick={() => { setIsManualAdding(false); setManualPdfContext(null); }} className="p-2 hover:bg-white rounded-full transition-colors">
               <ArrowLeft className="w-6 h-6" />
             </button>
-            <h1 className="text-2xl font-serif italic">Add Manual Quiz</h1>
+            <h1 className="text-2xl font-serif italic">Add Questions</h1>
           </div>
 
-          <div className="space-y-8">
-            <div className="bg-white p-8 rounded-[2.5rem] border border-stone-200 shadow-sm">
-              <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-4 px-1">Select or Enter Topic</label>
-              <div className="space-y-4">
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {topics.map(t => (
-                    <button
-                      key={t}
-                      onClick={() => setManualTopic(t)}
-                      className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${
-                        manualTopic === t ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="text"
-                  value={manualTopic}
-                  onChange={(e) => setManualTopic(e.target.value)}
-                  placeholder="Enter new topic..."
-                  className="w-full bg-stone-50 border-none rounded-2xl px-6 py-4 text-stone-900 placeholder-stone-300 focus:ring-2 focus:ring-stone-900 transition-all"
-                />
+          <div className="space-y-6">
+            {/* Topic */}
+            <div className="bg-white p-6 rounded-[2rem] border border-stone-200 shadow-sm">
+              <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-3">Topic / Source</label>
+              <div className="flex flex-wrap gap-2 mb-3">
+                {topics.map(t => (
+                  <button key={t} onClick={() => setManualTopic(t)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${manualTopic === t ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+                  >{t}</button>
+                ))}
               </div>
-            </div>
-
-            <div className="bg-white p-8 rounded-[2.5rem] border border-stone-200 shadow-sm">
-              <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-4 px-1">Questions & Answers (q: and a:)</label>
-              <textarea
-                value={manualInput}
-                onChange={(e) => setManualInput(e.target.value)}
-                placeholder="q: What is React?&#10;a: A JavaScript library for building user interfaces.&#10;&#10;q: What is JSX?&#10;a: A syntax extension for JavaScript."
-                className="w-full h-80 bg-stone-50 border-none rounded-2xl p-6 text-stone-800 placeholder-stone-300 focus:ring-2 focus:ring-stone-900 transition-all resize-none font-mono text-sm"
+              <input type="text" value={manualTopic} onChange={e => setManualTopic(e.target.value)}
+                placeholder="e.g. Chapter 3 — Database Normalisation"
+                className="w-full bg-stone-50 rounded-2xl px-5 py-3 text-sm focus:ring-2 focus:ring-stone-900 outline-none"
               />
             </div>
 
-            <button
-              onClick={handleManualAdd}
-              disabled={!manualInput.trim() || !manualTopic.trim() || isParsing}
-              className="w-full py-6 bg-stone-900 text-white rounded-[2rem] font-bold text-sm uppercase tracking-widest hover:bg-stone-800 disabled:opacity-50 transition-all shadow-xl shadow-stone-200 flex items-center justify-center gap-3"
-            >
-              {isParsing ? (
-                <div className="w-5 h-5 border-2 border-stone-300 border-t-white rounded-full animate-spin" />
+            {/* PDF import OR text input */}
+            <div className="bg-white p-6 rounded-[2rem] border border-stone-200 shadow-sm space-y-4">
+              <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest">Import Source</label>
+
+              {/* PDF upload */}
+              <input ref={manualPdfRef} type="file" accept="application/pdf" className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const base64 = (reader.result as string).split(',')[1];
+                    setManualPdfContext({ base64, mimeType: 'application/pdf', fileName: file.name });
+                    setManualInput('');
+                  };
+                  reader.readAsDataURL(file);
+                  e.target.value = '';
+                }}
+              />
+              {manualPdfContext ? (
+                <div className="flex items-center justify-between bg-stone-50 rounded-2xl px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-stone-500" />
+                    <span className="text-sm font-medium text-stone-700">{manualPdfContext.fileName}</span>
+                  </div>
+                  <button onClick={() => setManualPdfContext(null)} className="text-stone-400 hover:text-red-500 transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               ) : (
-                <Check className="w-5 h-5" />
+                <button onClick={() => manualPdfRef.current?.click()}
+                  className="w-full border-2 border-dashed border-stone-200 rounded-2xl py-5 flex items-center justify-center gap-3 text-stone-400 hover:border-stone-400 hover:text-stone-600 transition-all"
+                >
+                  <Upload className="w-5 h-5" />
+                  <span className="text-sm font-bold">Upload PDF (past exam, question bank, notes)</span>
+                </button>
               )}
-              {isParsing ? 'Parsing Questions...' : 'Save Manual Quiz'}
+
+              {!manualPdfContext && (
+                <>
+                  <div className="flex items-center gap-3 text-stone-300">
+                    <div className="flex-1 h-px bg-stone-100" />
+                    <span className="text-xs font-bold uppercase tracking-widest">or type manually</span>
+                    <div className="flex-1 h-px bg-stone-100" />
+                  </div>
+                  <textarea value={manualInput} onChange={e => setManualInput(e.target.value)}
+                    placeholder={'q: What is normalisation?\na: The process of organising a database to reduce redundancy.\n\nq: What is a primary key?\na: A unique identifier for each record in a table.'}
+                    className="w-full h-64 bg-stone-50 rounded-2xl p-5 text-sm font-mono text-stone-800 placeholder-stone-300 focus:ring-2 focus:ring-stone-900 outline-none resize-none"
+                  />
+                </>
+              )}
+            </div>
+
+            <button onClick={handleManualAdd}
+              disabled={(!manualInput.trim() && !manualPdfContext) || !manualTopic.trim() || isParsing}
+              className="w-full py-5 bg-stone-900 text-white rounded-[2rem] font-bold text-sm uppercase tracking-widest hover:bg-stone-800 disabled:opacity-50 transition-all flex items-center justify-center gap-3"
+            >
+              {isParsing ? <div className="w-5 h-5 border-2 border-stone-400 border-t-white rounded-full animate-spin" /> : <Check className="w-5 h-5" />}
+              {isParsing ? (manualPdfContext ? 'Extracting from PDF…' : 'Parsing Questions…') : 'Save Questions'}
             </button>
           </div>
         </div>
@@ -5153,7 +5304,66 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
   }
 
   if (selectingSource) {
-    const sources: string[] = Array.from(new Set(stateQuestions.map(q => q.source).filter(Boolean))) as string[];
+    if (selectedSourceFile) {
+      const existingQs = stateQuestions.filter(q => q.source === selectedSourceFile.name);
+      return (
+        <div className="min-h-screen bg-[#FDFCF8] p-6 font-sans">
+          <div className="max-w-2xl mx-auto">
+            <div className="flex items-center gap-4 mb-8">
+              <button onClick={() => setSelectedSourceFile(null)} className="p-2 hover:bg-white rounded-full transition-colors">
+                <ArrowLeft className="w-6 h-6" />
+              </button>
+              <div>
+                <h1 className="text-2xl font-serif italic">{selectedSourceFile.name}</h1>
+                <p className="text-xs text-stone-400 mt-0.5">{existingQs.length} questions already generated</p>
+              </div>
+            </div>
+            <div className="space-y-4">
+              {existingQs.length > 0 && (
+                <button onClick={() => startQuiz('Source', selectedSourceFile.name)} className="w-full bg-stone-900 text-white p-6 rounded-[2rem] flex items-center justify-between group hover:bg-stone-800 transition-all">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-white/10 rounded-2xl"><Zap className="w-6 h-6" /></div>
+                    <div className="text-left">
+                      <h3 className="text-lg font-bold">Practice These Questions</h3>
+                      <p className="text-sm text-stone-400">Quiz yourself on {existingQs.length} existing questions</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-stone-500 group-hover:text-white" />
+                </button>
+              )}
+              <button
+                onClick={() => handleGenerateFromFile(selectedSourceFile)}
+                disabled={isGeneratingFromFile}
+                className="w-full bg-white p-6 rounded-[2rem] border border-stone-200 flex items-center justify-between group hover:border-stone-900 transition-all disabled:opacity-50"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-purple-50 rounded-2xl text-purple-600"><Sparkles className="w-6 h-6" /></div>
+                  <div className="text-left">
+                    <h3 className="text-lg font-bold text-stone-900">{isGeneratingFromFile ? 'Generating…' : 'Generate Questions with AI'}</h3>
+                    <p className="text-sm text-stone-400">AI creates 10 questions from this file's content</p>
+                  </div>
+                </div>
+                {isGeneratingFromFile ? <div className="w-5 h-5 border-2 border-stone-300 border-t-stone-900 rounded-full animate-spin" /> : <ChevronRight className="w-5 h-5 text-stone-300 group-hover:text-stone-900" />}
+              </button>
+              <button
+                onClick={() => { setSelectedSourceFile(null); setSelectingSource(false); setManualTopic(selectedSourceFile.name); setIsManualAdding(true); }}
+                className="w-full bg-white p-6 rounded-[2rem] border border-stone-200 flex items-center justify-between group hover:border-stone-900 transition-all"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-blue-50 rounded-2xl text-blue-600"><Plus className="w-6 h-6" /></div>
+                  <div className="text-left">
+                    <h3 className="text-lg font-bold text-stone-900">Add Questions Manually</h3>
+                    <p className="text-sm text-stone-400">Type Q&A pairs or upload a PDF with questions</p>
+                  </div>
+                </div>
+                <ChevronRight className="w-5 h-5 text-stone-300 group-hover:text-stone-900" />
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-[#FDFCF8] p-6 font-sans">
         <div className="max-w-2xl mx-auto">
@@ -5161,26 +5371,31 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
             <button onClick={() => setSelectingSource(false)} className="p-2 hover:bg-white rounded-full transition-colors">
               <ArrowLeft className="w-6 h-6" />
             </button>
-            <h1 className="text-2xl font-serif italic">Select Source</h1>
+            <h1 className="text-2xl font-serif italic">Select Lecture File</h1>
           </div>
           <div className="grid grid-cols-1 gap-4">
-            {sources.length > 0 ? sources.map(source => (
-              <button
-                key={source}
-                onClick={() => startQuiz('Source', source)}
-                className="w-full bg-white p-6 rounded-[2rem] border border-stone-200 shadow-sm hover:border-stone-400 transition-all text-left flex items-center justify-between group"
-              >
-                <div>
-                  <h3 className="text-lg font-bold text-stone-900">{source}</h3>
-                  <p className="text-xs text-stone-400 uppercase font-bold tracking-widest mt-1">
-                    {stateQuestions.filter(q => q.source === source).length} Questions Available
-                  </p>
-                </div>
-                <ChevronRight className="w-5 h-5 text-stone-300 group-hover:text-stone-900 transition-all" />
-              </button>
-            )) : (
+            {lectureFiles.length > 0 ? lectureFiles.map(file => {
+              const qCount = stateQuestions.filter(q => q.source === file.name).length;
+              return (
+                <button key={file.id} onClick={() => setSelectedSourceFile(file)}
+                  className="w-full bg-white p-6 rounded-[2rem] border border-stone-200 shadow-sm hover:border-stone-900 transition-all text-left flex items-center justify-between group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-purple-50 rounded-2xl text-purple-600"><FileText className="w-6 h-6" /></div>
+                    <div>
+                      <h3 className="text-base font-bold text-stone-900">{file.name}</h3>
+                      <p className="text-xs text-stone-400 uppercase font-bold tracking-widest mt-1">
+                        {qCount > 0 ? `${qCount} Questions` : 'No questions yet'}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-stone-300 group-hover:text-stone-900 transition-all" />
+                </button>
+              );
+            }) : (
               <div className="text-center py-12">
-                <p className="text-stone-400 font-medium">No source-tagged questions found.</p>
+                <p className="text-stone-400 font-medium">No lecture files uploaded yet.</p>
+                <button onClick={() => { setSelectingSource(false); onBack(); }} className="mt-4 text-sm font-bold text-stone-900 underline">Go to Workspace to upload files</button>
               </div>
             )}
           </div>
@@ -5745,10 +5960,10 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
               </div>
             </div>
 
-            {/* Generate More Button */}
+            {/* Generate & Add Buttons */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
               <button
-                onClick={onGenerateQuiz}
+                onClick={() => setShowAiGenerateOptions(true)}
                 disabled={isGenerating}
                 className="p-6 bg-stone-100 border border-stone-200 rounded-3xl flex items-center justify-center gap-3 group hover:bg-stone-200 transition-all disabled:opacity-50"
               >
@@ -5761,17 +5976,50 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                   {isGenerating ? 'Generating...' : 'AI Generate'}
                 </span>
               </button>
-
               <button
                 onClick={() => setIsManualAdding(true)}
                 className="p-6 bg-white border border-stone-200 rounded-3xl flex items-center justify-center gap-3 group hover:border-stone-400 transition-all"
               >
                 <Plus className="w-5 h-5 text-stone-400 group-hover:text-stone-900" />
-                <span className="text-xs font-bold uppercase tracking-widest text-stone-600 group-hover:text-stone-900">
-                  Manual Add
-                </span>
+                <span className="text-xs font-bold uppercase tracking-widest text-stone-600 group-hover:text-stone-900">Manual Add</span>
               </button>
             </div>
+
+            {/* AI Generate Options Modal */}
+            <AnimatePresence>
+              {showAiGenerateOptions && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4"
+                  onClick={() => setShowAiGenerateOptions(false)}
+                >
+                  <motion.div initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
+                    onClick={e => e.stopPropagation()}
+                    className="bg-white rounded-[2.5rem] p-8 w-full max-w-md shadow-2xl space-y-4"
+                  >
+                    <h3 className="text-xl font-bold text-stone-900 mb-2">Generate Questions</h3>
+                    <button onClick={() => { setShowAiGenerateOptions(false); onGenerateQuiz(); }}
+                      disabled={isGenerating}
+                      className="w-full bg-stone-900 text-white p-5 rounded-2xl text-left flex items-center gap-4 hover:bg-stone-800 transition-all disabled:opacity-50"
+                    >
+                      <div className="p-2 bg-white/10 rounded-xl"><Brain className="w-5 h-5" /></div>
+                      <div>
+                        <p className="font-bold">Entire Course</p>
+                        <p className="text-xs text-stone-400">AI generates questions from all uploaded lecture materials</p>
+                      </div>
+                    </button>
+                    <button onClick={() => { setShowAiGenerateOptions(false); setSelectingSource(true); }}
+                      className="w-full bg-stone-50 border border-stone-200 p-5 rounded-2xl text-left flex items-center gap-4 hover:border-stone-900 transition-all"
+                    >
+                      <div className="p-2 bg-purple-50 rounded-xl text-purple-600"><FileText className="w-5 h-5" /></div>
+                      <div>
+                        <p className="font-bold text-stone-900">Specific Lecture File</p>
+                        <p className="text-xs text-stone-400">Select a file and generate questions from that topic only</p>
+                      </div>
+                    </button>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Quiz Modes */}
             <div className="space-y-4 mb-12">
@@ -5837,7 +6085,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                     <ChevronRight className="w-5 h-5 text-stone-500 group-hover:text-white transition-all" />
                   </div>
                   <h3 className="text-xl font-bold mb-1 text-white">Exam Preparation</h3>
-                  <p className="text-sm text-stone-400">15 mixed questions with varying difficulty levels & timer.</p>
+                  <p className="text-sm text-stone-400">5 questions per lecture source, mixed difficulty & timer.</p>
                 </div>
               </button>
             </div>
@@ -5866,25 +6114,78 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
 
             {/* Manage Questions */}
             <div className="space-y-4 pb-12">
-              <h2 className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-4 px-2">Manage Questions</h2>
+              <div className="flex items-center justify-between mb-4 px-2">
+                <h2 className="text-[10px] font-bold uppercase tracking-widest text-stone-400">Manage Questions ({stateQuestions.length})</h2>
+                {stateQuestions.length > 0 && (
+                  <button onClick={() => startQuiz('All')}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-stone-900 text-white rounded-xl text-xs font-bold hover:bg-stone-800 transition-all"
+                  >
+                    <Zap className="w-3.5 h-3.5" /> Practice All ({stateQuestions.length})
+                  </button>
+                )}
+              </div>
               <div className="space-y-3">
                 {stateQuestions.map(q => (
-                  <div key={q.id} className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm flex justify-between items-start gap-4 group hover:border-stone-300 transition-all">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-stone-800 line-clamp-2">{q.question}</p>
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="text-[9px] text-stone-400 uppercase font-bold tracking-widest">{q.type}</span>
-                        <span className="text-[9px] text-stone-300 uppercase font-bold tracking-widest">•</span>
-                        <span className="text-[9px] text-stone-400 uppercase font-bold tracking-widest">{q.topic}</span>
+                  <div key={q.id}>
+                    <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm group hover:border-stone-300 transition-all">
+                      <div className="flex justify-between items-start gap-4">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-stone-800 line-clamp-2">{q.question}</p>
+                          <div className="flex items-center gap-3 mt-2">
+                            <span className="text-[9px] text-stone-400 uppercase font-bold tracking-widest">{q.type}</span>
+                            <span className="text-[9px] text-stone-300">•</span>
+                            <span className="text-[9px] text-stone-400 uppercase font-bold tracking-widest">{q.topic}</span>
+                            {q.source && <><span className="text-[9px] text-stone-300">•</span><span className="text-[9px] text-stone-400 uppercase font-bold tracking-widest truncate max-w-[100px]">{q.source}</span></>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => { setPracticeQuestionId(practiceQuestionId === q.id ? null : q.id); setInlineAnswer(''); setInlineEvaluation(null); }}
+                            className="px-3 py-1.5 bg-stone-100 hover:bg-stone-900 hover:text-white text-stone-600 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all"
+                          >Learn</button>
+                          <button onClick={() => onDeleteQuestion?.(q.id)}
+                            className="p-2 text-stone-200 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                          ><Trash2 className="w-4 h-4" /></button>
+                        </div>
                       </div>
+
+                      {/* Inline practice panel */}
+                      {practiceQuestionId === q.id && (
+                        <div className="mt-4 pt-4 border-t border-stone-100 space-y-3">
+                          {inlineEvaluation ? (
+                            <div className="space-y-3">
+                              <div className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm ${inlineEvaluation.score >= 70 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                                {inlineEvaluation.score >= 70 ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                                {inlineEvaluation.score}% — {inlineEvaluation.score >= 70 ? 'Passed' : 'Needs Review'}
+                              </div>
+                              {inlineEvaluation.feedback && <p className="text-xs text-stone-600 bg-stone-50 rounded-xl p-3">{inlineEvaluation.feedback}</p>}
+                              <p className="text-xs font-bold text-stone-400 uppercase tracking-widest">Suggested Answer</p>
+                              <p className="text-xs text-stone-600 bg-stone-50 rounded-xl p-3">{q.suggestedAnswer}</p>
+                              <button onClick={() => { setInlineAnswer(''); setInlineEvaluation(null); }}
+                                className="text-xs font-bold text-stone-500 hover:text-stone-900 underline"
+                              >Try Again</button>
+                            </div>
+                          ) : (
+                            <>
+                              <textarea value={inlineAnswer} onChange={e => setInlineAnswer(e.target.value)}
+                                placeholder="Type your answer here…"
+                                className="w-full h-24 bg-stone-50 rounded-2xl p-4 text-sm text-stone-800 placeholder-stone-300 focus:ring-2 focus:ring-stone-900 outline-none resize-none"
+                              />
+                              <div className="flex gap-2">
+                                <button onClick={() => handleInlineEvaluate(q)}
+                                  disabled={!inlineAnswer.trim() || isInlineEvaluating}
+                                  className="flex-1 py-2.5 bg-stone-900 text-white rounded-xl text-xs font-bold hover:bg-stone-800 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                                >
+                                  {isInlineEvaluating ? <div className="w-4 h-4 border-2 border-stone-400 border-t-white rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                                  {isInlineEvaluating ? 'Evaluating…' : 'Submit'}
+                                </button>
+                                <button onClick={() => setPracticeQuestionId(null)} className="px-4 py-2.5 bg-stone-100 text-stone-600 rounded-xl text-xs font-bold hover:bg-stone-200 transition-all">Close</button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <button 
-                      onClick={() => onDeleteQuestion?.(q.id)}
-                      className="p-2 text-stone-200 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                      title="Delete Question"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
                   </div>
                 ))}
               </div>
@@ -5999,6 +6300,7 @@ const api = {
   saveCourse: (uid: string, course: Course) => setDoc(doc(db, 'users', uid, 'courses', course.id), course).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${uid}/courses/${course.id}`)),
   deleteCourse: (uid: string, courseId: string) => deleteDoc(doc(db, 'users', uid, 'courses', courseId)).catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/courses/${courseId}`)),
   getFiles: (uid: string, courseId: string) => getDocs(query(collection(db, 'users', uid, 'files'), where('courseId', '==', courseId))).then(s => s.docs.map(d => d.data() as LectureFile)).catch(e => { handleFirestoreError(e, OperationType.LIST, `users/${uid}/files`); return []; }),
+  getAllFiles: (uid: string) => getDocs(collection(db, 'users', uid, 'files')).then(s => s.docs.map(d => d.data() as LectureFile)).catch(e => { handleFirestoreError(e, OperationType.LIST, `users/${uid}/files`); return []; }),
   saveFile: (uid: string, file: LectureFile) => setDoc(doc(db, 'users', uid, 'files', file.id), file).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${uid}/files/${file.id}`)),
   deleteFile: (uid: string, file: LectureFile) => {
     const promises = [deleteDoc(doc(db, 'users', uid, 'files', file.id)).catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/files/${file.id}`))];
@@ -6070,6 +6372,7 @@ const api = {
 
   // Project Workspace API
   getProjectTasks: (uid: string, courseId: string) => getDocs(query(collection(db, 'users', uid, 'project_tasks'), where('courseId', '==', courseId))).then(s => s.docs.map(d => d.data() as ProjectTask)).catch(e => { handleFirestoreError(e, OperationType.LIST, `users/${uid}/project_tasks`); return []; }),
+  getAllProjectTasks: (uid: string) => getDocs(collection(db, 'users', uid, 'project_tasks')).then(s => s.docs.map(d => d.data() as ProjectTask)).catch(e => { handleFirestoreError(e, OperationType.LIST, `users/${uid}/project_tasks`); return []; }),
   saveProjectTask: (uid: string, task: ProjectTask) => setDoc(doc(db, 'users', uid, 'project_tasks', task.id), task).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${uid}/project_tasks/${task.id}`)),
   deleteProjectTask: (uid: string, id: string) => deleteDoc(doc(db, 'users', uid, 'project_tasks', id)).catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/project_tasks/${id}`)),
   
@@ -7966,7 +8269,7 @@ export default function App() {
     courseOfStudy: 'International Business Information System',
     currentSemester: 6,
     pastCourses: [] as string[],
-    profilePicture: 'https://drive.google.com/uc?export=view&id=1NzAsywgVnWa8tIBA490cQsfUThV01XAU'
+    profilePicture: ''
   });
   const [newPastCourse, setNewPastCourse] = useState('');
   const [authError, setAuthError] = useState('');
@@ -8024,7 +8327,7 @@ export default function App() {
               courseOfStudy: 'International Business Information System',
               currentSemester: 6,
               pastCourses: [],
-              profilePicture: 'https://drive.google.com/uc?export=view&id=1NzAsywgVnWa8tIBA490cQsfUThV01XAU',
+              profilePicture: '',
               lastSemesterUpdate: new Date().toISOString()
             });
           }
@@ -8383,8 +8686,48 @@ export default function App() {
   };
 
   const SemesterProgressBar = () => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    // If exam timetable has entries, show countdown to nearest upcoming exam
+    const upcomingExams = examTimetable
+      .filter(e => e.examDate >= todayStr)
+      .sort((a, b) => a.examDate.localeCompare(b.examDate));
+
+    if (upcomingExams.length > 0) {
+      const nearest = upcomingExams[0];
+      const examDate = new Date(nearest.examDate + 'T' + nearest.startTime + ':00');
+      const daysLeft = Math.max(0, Math.ceil((examDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+      const start = new Date(semesterStart);
+      const totalDays = Math.max(1, Math.ceil((examDate.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+      const elapsed = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      const progress = Math.max(0, Math.min(100, (elapsed / totalDays) * 100));
+      const urgencyColor = daysLeft <= 7 ? 'bg-rose-500' : daysLeft <= 14 ? 'bg-amber-500' : 'bg-stone-900';
+
+      return (
+        <div className="w-full bg-white/80 backdrop-blur-md border-b border-stone-100 px-6 py-3 sticky top-0 z-[60]">
+          <div className="max-w-md mx-auto">
+            <div className="flex justify-between items-end mb-1">
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${daysLeft <= 7 ? 'text-rose-600' : daysLeft <= 14 ? 'text-amber-600' : 'text-stone-900'}`}>
+                {daysLeft === 0 ? 'Exam today!' : `${daysLeft} ${daysLeft === 1 ? 'Day' : 'Days'} until ${nearest.courseName}`}
+              </span>
+              <span className="text-[10px] font-bold text-stone-900">{Math.round(progress)}%</span>
+            </div>
+            <div className="h-1.5 w-full bg-stone-100 rounded-full overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                transition={{ duration: 1, ease: "easeOut" }}
+                className={`h-full rounded-full ${urgencyColor}`}
+              />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Fall back to class timetable semester progress
     const classEvents = allTimetableOccurrences;
-    
     if (classEvents.length === 0) {
       return (
         <div className="w-full bg-white/80 backdrop-blur-md border-b border-stone-100 px-6 py-3 sticky top-0 z-[60]">
@@ -8393,7 +8736,7 @@ export default function App() {
               <div className="h-full bg-stone-200 w-0" />
             </div>
             <p className="text-[10px] text-stone-500 font-medium text-center">
-              Add your class timetable to start tracking semester progress.
+              Add your class timetable or exam dates to track progress.
             </p>
           </div>
         </div>
@@ -8402,16 +8745,9 @@ export default function App() {
 
     const start = new Date(semesterStart);
     const end = new Date(semesterEnd);
-    const now = new Date();
-    
-    // Calculate semester progress
     const totalDuration = end.getTime() - start.getTime();
     const elapsed = now.getTime() - start.getTime();
     const progress = totalDuration > 0 ? Math.max(0, Math.min(100, (elapsed / totalDuration) * 100)) : 0;
-
-    // Calculate weeks
-    const totalWeeks = Math.max(1, Math.ceil(totalDuration / (1000 * 60 * 60 * 24 * 7)));
-    const currentWeek = Math.max(1, Math.min(totalWeeks, Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7))));
     const weeksLeft = Math.max(0, Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 7)));
 
     return (
@@ -8421,12 +8757,10 @@ export default function App() {
             <span className="text-[10px] font-bold text-stone-900 uppercase tracking-wider">
               {weeksLeft} {weeksLeft === 1 ? 'Week' : 'Weeks'} until Exams
             </span>
-            <span className="text-[10px] font-bold text-stone-900">
-              {Math.round(progress)}%
-            </span>
+            <span className="text-[10px] font-bold text-stone-900">{Math.round(progress)}%</span>
           </div>
           <div className="h-1.5 w-full bg-stone-100 rounded-full overflow-hidden">
-            <motion.div 
+            <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${progress}%` }}
               transition={{ duration: 1, ease: "easeOut" }}
@@ -8781,6 +9115,8 @@ export default function App() {
   };
   const [globalFlashcards, setGlobalFlashcards] = useState<Flashcard[]>([]);
   const [globalSimulations, setGlobalSimulations] = useState<ExamSimulationSession[]>([]);
+  const [globalLectureFiles, setGlobalLectureFiles] = useState<LectureFile[]>([]);
+  const [globalProjectTasks, setGlobalProjectTasks] = useState<ProjectTask[]>([]);
 
   useEffect(() => {
     console.log("CONNECTED");
@@ -8799,7 +9135,7 @@ export default function App() {
   useEffect(() => {
     if (user) {
       const fetchData = async () => {
-        const [fetchedCourses, fetchedLogs, fetchedCards, fetchedSims, fetchedTimetable, fetchedTasks, fetchedInsights, fetchedWeeklySims, fetchedExamTimetable] = await Promise.all([
+        const [fetchedCourses, fetchedLogs, fetchedCards, fetchedSims, fetchedTimetable, fetchedTasks, fetchedInsights, fetchedWeeklySims, fetchedExamTimetable, fetchedProjectTasks] = await Promise.all([
           api.getCourses(user.uid),
           api.getStudyLogs(user.uid),
           api.getAllFlashcards(user.uid),
@@ -8808,7 +9144,8 @@ export default function App() {
           api.getTasks(user.uid),
           api.getInsights(user.uid),
           api.getWeeklySimulations(user.uid),
-          api.getExamTimetable(user.uid)
+          api.getExamTimetable(user.uid),
+          api.getAllProjectTasks(user.uid)
         ]);
 
         const coursesArr = (fetchedCourses || []) as Course[];
@@ -8820,6 +9157,7 @@ export default function App() {
         const insightsArr = (fetchedInsights || []) as ProfessorInsight[];
         const weeklySimsArr = (fetchedWeeklySims || []) as WeeklySimulation[];
         const examTimetableArr = (fetchedExamTimetable || []) as ExamTimetableEntry[];
+        const allProjectTasksArr = (fetchedProjectTasks || []) as ProjectTask[];
 
         if (coursesArr.length > 0) {
           setCourses(coursesArr);
@@ -8832,6 +9170,29 @@ export default function App() {
         setInsights(insightsArr);
         setWeeklySimulations(weeklySimsArr);
         setExamTimetable(examTimetableArr);
+        // Load project tasks per-course (collection queries fail, per-course work)
+        const projectCourses = coursesArr.filter(c => c.type === 'Project');
+        if (projectCourses.length > 0) {
+          const allPTNested = await Promise.all(
+            projectCourses.map(c => api.getProjectTasks(user.uid, c.id))
+          );
+          const allPT = allPTNested.flat() as ProjectTask[];
+          setGlobalProjectTasks(allPT);
+        }
+
+        // Fetch files and fix lecturesCount for all courses
+        if (coursesArr.length > 0) {
+          const allFilesNested = await Promise.all(
+            coursesArr.map(c => api.getFiles(user.uid, c.id))
+          );
+          const allFiles = allFilesNested.flat() as LectureFile[];
+          setGlobalLectureFiles(allFiles);
+          const fixedCourses = coursesArr.map(c => ({
+            ...c,
+            lecturesCount: allFiles.filter(f => f.courseId === c.id).length
+          }));
+          setCourses(fixedCourses);
+        }
       };
       fetchData();
     }
@@ -8863,6 +9224,10 @@ export default function App() {
             api.getProjectInsights(user.uid, selectedCourse.id)
           ]);
           setProjectTasks(tasks);
+          setGlobalProjectTasks(prev => {
+            const others = prev.filter(t => t.courseId !== selectedCourse.id);
+            return [...others, ...tasks];
+          });
           setProjectMilestones(milestones);
           setProjectNotes(notes);
           setProjectInsights(insightsData);
@@ -8886,6 +9251,17 @@ export default function App() {
           const topicsArr = (topicsData || []) as Topic[];
 
           setLectureFiles(filesArr);
+          // Merge into global so courses list count is always accurate
+          setGlobalLectureFiles(prev => {
+            const withoutThisCourse = prev.filter(f => f.courseId !== selectedCourse.id);
+            return [...withoutThisCourse, ...filesArr];
+          });
+          // Fix stored lecturesCount if it's out of sync
+          if (filesArr.length !== (selectedCourse.lecturesCount || 0)) {
+            const fixedCourse = { ...selectedCourse, lecturesCount: filesArr.length };
+            setCourses(prev => prev.map(c => c.id === fixedCourse.id ? fixedCourse : c));
+            if (user) api.saveCourse(user.uid, fixedCourse);
+          }
           setFlashcards(cardsArr);
           setQuizQuestions(quizArr);
           setExamQuestions(examArr);
@@ -8945,13 +9321,29 @@ export default function App() {
   }, [allTimetableOccurrences, semesterStart, semesterEnd]);
 
   // Dynamic Course Stats
-  const enrichedCourses = courses.map(course => ({
-    ...course,
-    flashcardsCount: flashcards.filter(f => f.courseId === course.id).length,
-    lecturesCount: lectureFiles.filter(f => f.courseId === course.id).length,
-    quizQuestionsCount: quizQuestions.filter(q => q.courseId === course.id).length,
-    examSimulationsCount: examSimulations.filter(s => s.courseId === course.id).length,
-  }));
+  const enrichedCourses = courses.map(course => {
+    const courseStudyLogs = studyLogs.filter(l => l.courseId === course.id);
+    const lastLog = courseStudyLogs.sort((a, b) => b.date.localeCompare(a.date))[0];
+    let lastStudied = 'Never';
+    if (lastLog) {
+      const today = new Date().toISOString().split('T')[0];
+      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      if (lastLog.date === today) lastStudied = 'Today';
+      else if (lastLog.date === yesterday) lastStudied = 'Yesterday';
+      else {
+        const days = Math.floor((Date.now() - new Date(lastLog.date).getTime()) / 86400000);
+        lastStudied = `${days} days ago`;
+      }
+    }
+    return {
+      ...course,
+      flashcardsCount: globalFlashcards.filter(f => f.courseId === course.id).length || course.flashcardsCount || 0,
+      lecturesCount: globalLectureFiles.filter(f => f.courseId === course.id).length || course.lecturesCount || 0,
+      quizQuestionsCount: quizQuestions.filter(q => q.courseId === course.id).length,
+      examSimulationsCount: examSimulations.filter(s => s.courseId === course.id).length,
+      lastStudied,
+    };
+  });
 
   // Generation State
   const [isGeneratingStudyMaterials, setIsGeneratingStudyMaterials] = useState(false);
@@ -9093,6 +9485,22 @@ export default function App() {
     };
     await api.saveExamTimetableEntry(user.uid, entry);
     setExamTimetable(prev => [...prev, entry].sort((a, b) => a.examDate.localeCompare(b.examDate)));
+
+    if (googleDriveConnected) {
+      try {
+        await handleSyncToGoogleCalendar([{
+          id: entry.id,
+          title: `[Exam] ${entry.courseName}`,
+          description: `Exam: ${entry.courseName}${entry.location ? `\nLocation: ${entry.location}` : ''}${entry.notes ? `\nNotes: ${entry.notes}` : ''}`,
+          start: `${entry.examDate}T${entry.startTime}:00`,
+          end: `${entry.examDate}T${entry.endTime}:00`,
+          courseName: entry.courseName
+        }]);
+      } catch (e) {
+        console.error('Failed to sync exam to Google Calendar:', e);
+      }
+    }
+
     setNewExamEntry({});
     setIsAddingExamDate(false);
   };
@@ -9263,7 +9671,14 @@ export default function App() {
                       fileType
                     };
                     setLectureFiles(prev => [newFile, ...prev]);
+                    setGlobalLectureFiles(prev => [newFile, ...prev]);
                     await api.saveFile(user.uid, newFile);
+                    if (selectedCourse) {
+                      const updatedCourse = { ...selectedCourse, lecturesCount: (selectedCourse.lecturesCount || 0) + 1 };
+                      setSelectedCourse(updatedCourse);
+                      setCourses(prev => prev.map(c => c.id === updatedCourse.id ? updatedCourse : c));
+                      await api.saveCourse(user.uid, updatedCourse);
+                    }
                   } else {
                     const newPQ: PastQuestion = {
                       id: Math.random().toString(36).substr(2, 9),
@@ -9386,6 +9801,7 @@ export default function App() {
             fileType
           };
           setLectureFiles(prev => [newFile, ...prev]);
+          setGlobalLectureFiles(prev => [newFile, ...prev]);
           await api.saveFile(user.uid, newFile);
           
           // Update course lectures count
@@ -9479,6 +9895,7 @@ export default function App() {
 
         setCourses(prev => prev.filter(c => c.id !== courseId));
         setLectureFiles(prev => prev.filter(f => f.courseId !== courseId));
+        setGlobalLectureFiles(prev => prev.filter(f => f.courseId !== courseId));
         setPastQuestions(prev => prev.filter(pq => pq.courseId !== courseId));
         setFlashcards(prev => prev.filter(fc => fc.courseId !== courseId));
         setQuizQuestions(prev => prev.filter(q => q.courseId !== courseId));
@@ -9557,6 +9974,7 @@ export default function App() {
     openConfirm("Delete File?", "Are you sure you want to delete this lecture file?", async () => {
       const fileToDelete = lectureFiles.find(f => f.id === id);
       setLectureFiles(prev => prev.filter(f => f.id !== id));
+      setGlobalLectureFiles(prev => prev.filter(f => f.id !== id));
       if (user && fileToDelete) {
         try {
           await api.deleteFile(user.uid, fileToDelete);
@@ -10998,13 +11416,23 @@ export default function App() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-stone-50 rounded-2xl p-3 flex items-center gap-3">
-                      <Layers className="w-4 h-4 text-stone-400" />
-                      <div>
-                        <p className="text-sm font-bold text-stone-900">{course.flashcardsCount}</p>
-                        <p className="text-[10px] text-stone-500 font-medium uppercase tracking-wider">Flashcards</p>
+                    {course.type === 'Project' ? (
+                      <div className="bg-stone-50 rounded-2xl p-3 flex items-center gap-3">
+                        <CheckSquare className="w-4 h-4 text-stone-400" />
+                        <div>
+                          <p className="text-sm font-bold text-stone-900">{globalProjectTasks.filter(t => t.courseId === course.id).length}</p>
+                          <p className="text-[10px] text-stone-500 font-medium uppercase tracking-wider">Tasks</p>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="bg-stone-50 rounded-2xl p-3 flex items-center gap-3">
+                        <Layers className="w-4 h-4 text-stone-400" />
+                        <div>
+                          <p className="text-sm font-bold text-stone-900">{course.flashcardsCount}</p>
+                          <p className="text-[10px] text-stone-500 font-medium uppercase tracking-wider">Flashcards</p>
+                        </div>
+                      </div>
+                    )}
                     <div className="bg-stone-50 rounded-2xl p-3 flex items-center gap-3">
                       <FileUp className="w-4 h-4 text-stone-400" />
                       <div>
@@ -11802,16 +12230,19 @@ export default function App() {
                 if (!user) return;
                 const taskWithUid = { ...task, uid: user.uid };
                 setProjectTasks(prev => [taskWithUid, ...prev]);
+                setGlobalProjectTasks(prev => [taskWithUid, ...prev]);
                 api.saveProjectTask(user.uid, taskWithUid);
               }}
               onUpdateTask={(task) => {
                 if (!user) return;
                 const taskWithUid = { ...task, uid: user.uid };
                 setProjectTasks(prev => prev.map(t => t.id === task.id ? taskWithUid : t));
+                setGlobalProjectTasks(prev => prev.map(t => t.id === task.id ? taskWithUid : t));
                 api.saveProjectTask(user.uid, taskWithUid);
               }}
               onDeleteTask={(id) => {
                 setProjectTasks(prev => prev.filter(t => t.id !== id));
+                setGlobalProjectTasks(prev => prev.filter(t => t.id !== id));
                 if (user) api.deleteProjectTask(user.uid, id);
               }}
               googleConnected={googleDriveConnected}
@@ -13377,8 +13808,8 @@ export default function App() {
                   {isEditingProfile && (
                     <label className="absolute bottom-4 right-0 w-10 h-10 bg-stone-900 text-white rounded-2xl flex items-center justify-center shadow-lg cursor-pointer hover:scale-110 transition-transform">
                       <Camera className="w-5 h-5" />
-                      <input 
-                        type="file" accept="image/*" className="hidden" 
+                      <input
+                        type="file" accept="image/*" className="hidden"
                         onChange={async e => {
                           const file = e.target.files?.[0];
                           if (file && profile) {
@@ -13386,7 +13817,8 @@ export default function App() {
                               const compressed = await compressImage(file);
                               setProfile({...profile, profilePicture: compressed});
                             } catch (err) {
-                              console.error("Error compressing image:", err);
+                              console.error("Error uploading profile picture:", err);
+                              alert("Failed to process photo. Please try a smaller image.");
                             }
                           }
                         }}
