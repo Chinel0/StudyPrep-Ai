@@ -5940,8 +5940,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
           <div className="w-10" />
         </div>
 
-        {stateQuestions.length > 0 ? (
-          <>
+        <>
             {/* Stats Card */}
             <div className="bg-white rounded-[2.5rem] p-10 shadow-sm border border-stone-200 mb-8">
               <div className="grid grid-cols-3 gap-6">
@@ -6020,6 +6019,14 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* No questions notice */}
+            {stateQuestions.length === 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 mb-6 flex items-center gap-3">
+                <Brain className="w-5 h-5 text-amber-500 shrink-0" />
+                <p className="text-sm text-amber-800 font-medium">No questions yet — use <strong>AI Generate</strong> or <strong>Manual Add</strong> above to create questions for this course.</p>
+              </div>
+            )}
 
             {/* Quiz Modes */}
             <div className="space-y-4 mb-12">
@@ -6190,52 +6197,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                 ))}
               </div>
             </div>
-          </>
-        ) : (
-          <div className="bg-white border border-stone-100 rounded-[2.5rem] p-12 text-center shadow-sm">
-            <div className="w-24 h-24 bg-stone-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8">
-              <Brain className="w-12 h-12 text-stone-300" />
-            </div>
-            <h2 className="text-2xl font-bold text-stone-900 mb-3">
-              {lectureFiles.length > 0 ? 'Ready to Practice?' : 'No Materials Found'}
-            </h2>
-            <p className="text-sm text-stone-500 max-w-xs mx-auto mb-10 leading-relaxed">
-              {lectureFiles.length > 0 
-                ? 'You have lecture materials uploaded. Use AI to generate practice questions tailored to your course content and professor\'s style.'
-                : 'Upload your lecture notes, PDFs, or past exams first. Then, our AI will generate custom practice questions to help you prepare.'}
-            </p>
-            
-            <div className="flex flex-col gap-3">
-              {lectureFiles.length > 0 ? (
-                <button 
-                  onClick={onGenerateQuiz}
-                  disabled={isGenerating}
-                  className="w-full py-5 bg-stone-900 text-white rounded-2xl font-bold text-sm uppercase tracking-widest hover:bg-stone-800 transition-all shadow-lg shadow-stone-200 flex items-center justify-center gap-3 disabled:opacity-50"
-                >
-                  {isGenerating ? (
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <Sparkles className="w-5 h-5" />
-                  )}
-                  {isGenerating ? 'Analyzing & Generating...' : 'Generate Practice Questions'}
-                </button>
-              ) : (
-                <button 
-                  onClick={onBack}
-                  className="w-full py-5 bg-stone-900 text-white rounded-2xl font-bold text-sm uppercase tracking-widest hover:bg-stone-800 transition-all shadow-lg shadow-stone-200"
-                >
-                  Upload Lecture Materials
-                </button>
-              )}
-              <button 
-                onClick={onBack}
-                className="w-full py-5 bg-stone-100 text-stone-600 rounded-2xl font-bold text-sm uppercase tracking-widest hover:bg-stone-200 transition-all"
-              >
-                Go to Workspace
-              </button>
-            </div>
-          </div>
-        )}
+        </>
       </div>
     </div>
   );
@@ -9476,12 +9438,12 @@ export default function App() {
     const entry: ExamTimetableEntry = {
       id: Math.random().toString(36).substr(2, 9),
       courseName: newExamEntry.courseName,
-      courseId: newExamEntry.courseId,
       examDate: newExamEntry.examDate,
       startTime: newExamEntry.startTime,
       endTime: newExamEntry.endTime,
-      location: newExamEntry.location,
-      notes: newExamEntry.notes
+      ...(newExamEntry.courseId && { courseId: newExamEntry.courseId }),
+      ...(newExamEntry.location && { location: newExamEntry.location }),
+      ...(newExamEntry.notes && { notes: newExamEntry.notes }),
     };
     await api.saveExamTimetableEntry(user.uid, entry);
     setExamTimetable(prev => [...prev, entry].sort((a, b) => a.examDate.localeCompare(b.examDate)));
@@ -10945,13 +10907,19 @@ export default function App() {
                       <div className="space-y-4">
                         <div>
                           <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400 block mb-1.5">Course Name</label>
-                          <input
-                            type="text"
-                            value={newExamEntry.courseName || ''}
-                            onChange={e => setNewExamEntry(p => ({ ...p, courseName: e.target.value }))}
-                            placeholder="e.g. Database Systems"
-                            className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl text-sm focus:ring-2 focus:ring-stone-900 outline-none"
-                          />
+                          <select
+                            value={newExamEntry.courseId || ''}
+                            onChange={e => {
+                              const selected = courses.find(c => c.id === e.target.value);
+                              setNewExamEntry(p => ({ ...p, courseId: selected?.id, courseName: selected?.name || '' }));
+                            }}
+                            className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl text-sm focus:ring-2 focus:ring-stone-900 outline-none appearance-none"
+                          >
+                            <option value="">Select an exam course...</option>
+                            {courses.filter(c => c.type === 'Exam').map(c => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
                         </div>
                         <div>
                           <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400 block mb-1.5">Exam Date</label>
@@ -11156,7 +11124,7 @@ export default function App() {
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {weeklySimulations.length > 0 ? (
-                  weeklySimulations.map((sim) => {
+                  weeklySimulations.slice(0, 4).map((sim) => {
                     const colorClass = getCourseColor(sim.courseName);
                     return (
                       <motion.div 
@@ -11273,6 +11241,11 @@ export default function App() {
                   </div>
                 )}
               </div>
+              {weeklySimulations.length > 4 && (
+                <p className="text-center text-xs text-stone-400 font-medium mt-4">
+                  Showing 4 of {weeklySimulations.length} simulations
+                </p>
+              )}
             </section>
           </motion.div>
         )}
