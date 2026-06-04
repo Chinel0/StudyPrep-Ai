@@ -4765,6 +4765,8 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [showSuggested, setShowSuggested] = useState(false);
+  const [selfGradeMode, setSelfGradeMode] = useState(false);
+  const [showSelfGradeAnswer, setShowSelfGradeAnswer] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [selectingTopic, setSelectingTopic] = useState(false);
   const [selectingSource, setSelectingSource] = useState(false);
@@ -5095,6 +5097,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
         setCurrentAnswer(session.answers[nextQ.id] || '');
       }
       setShowSuggested(false);
+      setShowSelfGradeAnswer(false);
     } else {
       setIsReviewing(true);
       if (onStudyComplete && session.startTime) {
@@ -5565,7 +5568,13 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                   <span className="text-xs font-bold font-mono">{formatTime(session.timeLeft || 0)}</span>
                 </div>
               ) : (
-                <div className="w-10" />
+                <button
+                  onClick={() => { setSelfGradeMode(m => !m); setShowSelfGradeAnswer(false); }}
+                  className={`px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${selfGradeMode ? 'bg-amber-100 text-amber-700' : 'bg-stone-100 text-stone-400'}`}
+                  title="Self-grade mode: no AI needed"
+                >
+                  {selfGradeMode ? '✓ Self-Grade' : 'Self-Grade'}
+                </button>
               )}
             </div>
             
@@ -5685,27 +5694,59 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                   
                   {!evaluation ? (
                     <div className="grid grid-cols-1 gap-3">
-                      <button
-                        onClick={handleEvaluate}
-                        disabled={!currentAnswer.trim() || isEvaluating}
-                        className="w-full py-5 bg-stone-900 text-white rounded-[1.5rem] font-bold text-sm uppercase tracking-widest hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-stone-200"
-                      >
-                        Submit Answer
-                      </button>
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          onClick={() => setShowSuggested(!showSuggested)}
-                          className="py-4 bg-white border border-stone-200 text-stone-600 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-stone-50 transition-colors"
-                        >
-                          {showSuggested ? 'Hide Suggested' : 'Suggested Answer'}
-                        </button>
-                        <button
-                          onClick={nextQuestion}
-                          className="py-4 bg-stone-100 text-stone-600 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-stone-200 transition-colors"
-                        >
-                          Skip Question
-                        </button>
-                      </div>
+                      {selfGradeMode && showSelfGradeAnswer ? (
+                        /* Self-grade: show answer + Got it / Missed it */
+                        <div className="space-y-3">
+                          <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-2">Suggested Answer</p>
+                            <p className="text-sm text-stone-700 leading-relaxed">{currentQuestion.suggestedAnswer}</p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              onClick={() => {
+                                const fakeEval: QuizEvaluation = { id: Math.random().toString(36).substr(2,9), courseId: course.id, questionId: currentQuestion.id, studentAnswer: currentAnswer, score: 100, correctPoints: ['Self-marked correct'], missingPoints: [], incorrectPoints: [], feedback: 'Self-graded as correct.', timestamp: Date.now() };
+                                setSession(prev => prev ? { ...prev, evaluations: { ...prev.evaluations, [currentQuestion.id]: fakeEval } } : null);
+                                setDailyStats(prev => ({ ...prev, practiced: prev.practiced + 1, correct: prev.correct + 1, accuracy: Math.round(((prev.correct + 1) / (prev.practiced + 1)) * 100) }));
+                                setShowSelfGradeAnswer(false);
+                              }}
+                              className="py-4 bg-emerald-600 text-white rounded-2xl font-bold text-sm hover:bg-emerald-700 transition-all"
+                            >✓ Got It</button>
+                            <button
+                              onClick={() => {
+                                const fakeEval: QuizEvaluation = { id: Math.random().toString(36).substr(2,9), courseId: course.id, questionId: currentQuestion.id, studentAnswer: currentAnswer, score: 0, correctPoints: [], missingPoints: ['Self-marked incorrect'], incorrectPoints: [], feedback: 'Self-graded as incorrect — review this topic.', timestamp: Date.now() };
+                                setSession(prev => prev ? { ...prev, evaluations: { ...prev.evaluations, [currentQuestion.id]: fakeEval } } : null);
+                                setDailyStats(prev => ({ ...prev, practiced: prev.practiced + 1, accuracy: Math.round((prev.correct / (prev.practiced + 1)) * 100) }));
+                                setShowSelfGradeAnswer(false);
+                              }}
+                              className="py-4 bg-red-100 text-red-700 rounded-2xl font-bold text-sm hover:bg-red-200 transition-all"
+                            >✗ Missed It</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={selfGradeMode ? () => setShowSelfGradeAnswer(true) : handleEvaluate}
+                            disabled={!currentAnswer.trim() || isEvaluating}
+                            className="w-full py-5 bg-stone-900 text-white rounded-[1.5rem] font-bold text-sm uppercase tracking-widest hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-stone-200"
+                          >
+                            {selfGradeMode ? 'Show Answer' : isEvaluating ? 'Evaluating…' : 'Submit Answer'}
+                          </button>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              onClick={() => setShowSuggested(!showSuggested)}
+                              className="py-4 bg-white border border-stone-200 text-stone-600 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-stone-50 transition-colors"
+                            >
+                              {showSuggested ? 'Hide Suggested' : 'Suggested Answer'}
+                            </button>
+                            <button
+                              onClick={nextQuestion}
+                              className="py-4 bg-stone-100 text-stone-600 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-stone-200 transition-colors"
+                            >
+                              Skip Question
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-8">
