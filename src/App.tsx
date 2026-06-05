@@ -3302,6 +3302,8 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
   const [isQuestionCountModalOpen, setIsQuestionCountModalOpen] = useState(false);
   const [isConfirmGenModalOpen, setIsConfirmGenModalOpen] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{ open: boolean, title: string, message: string }>({ open: false, title: '', message: '' });
+  const [selfGradeMode, setSelfGradeMode] = useState(false);
+  const [selfGradeReview, setSelfGradeReview] = useState<{ questionIndex: number; marks: Record<string, boolean> } | null>(null);
 
   const showAlert = (title: string, message: string) => {
     setAlertConfig({ open: true, title, message });
@@ -3488,10 +3490,17 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
 
   const handleFinishSimulation = async () => {
     if (!session || !user) return;
+
+    // Self-grade mode: go to manual review instead of AI
+    if (selfGradeMode) {
+      setSelfGradeReview({ questionIndex: 0, marks: {} });
+      return;
+    }
+
     setIsSubmitting(true);
-    
+
     const timeUsedSeconds = (session.durationMinutes * 60) - timeLeft;
-    
+
     try {
       if (!process.env.GEMINI_API_KEY) {
         throw new Error("Gemini API Key is missing.");
@@ -3593,10 +3602,51 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
 
     } catch (error) {
       console.error("Exam evaluation failed:", error);
-      alert("Failed to evaluate exam. Please try again or check your connection.");
+      setIsSubmitting(false);
+      const useSelfGrade = window.confirm("AI evaluation failed (quota exceeded). Switch to Self-Grade mode to mark your answers manually?");
+      if (useSelfGrade) {
+        setSelfGradeMode(true);
+        setSelfGradeReview({ questionIndex: 0, marks: {} });
+      }
+      return;
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleSelfGradeComplete = async (marks: Record<string, boolean>) => {
+    if (!session || !user) return;
+    const timeUsedSeconds = (session.durationMinutes * 60) - timeLeft;
+    const evaluations: Record<string, QuizEvaluation> = {};
+    let correctCount = 0;
+    session.questions.forEach(q => {
+      const gotIt = marks[q.id] ?? false;
+      evaluations[q.id] = {
+        id: Math.random().toString(36).substr(2, 9),
+        courseId: course.id,
+        questionId: q.id,
+        studentAnswer: session.answers[q.id] || 'No answer',
+        score: gotIt ? q.points : 0,
+        correctPoints: gotIt ? ['Self-marked correct'] : [],
+        missingPoints: gotIt ? [] : ['Self-marked incorrect'],
+        incorrectPoints: [],
+        feedback: gotIt ? 'You marked this as correct.' : 'You marked this as incorrect — review this topic.',
+        timestamp: Date.now()
+      };
+      if (gotIt) correctCount++;
+    });
+    const totalPoints = session.questions.reduce((acc, q) => acc + q.points, 0);
+    const earnedPoints = Object.values(evaluations).reduce((acc, e) => acc + e.score, 0);
+    const scorePercentage = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
+    const weakTopics = Array.from(new Set(session.questions.filter(q => !marks[q.id]).map(q => q.topic))) as string[];
+    const finalResult: ExamResult = { score: scorePercentage, timeUsedSeconds, correctAnswers: correctCount, totalQuestions: session.questions.length, weakTopics, evaluations };
+    setResult(finalResult);
+    setIsResultView(true);
+    setSelfGradeReview(null);
+    const updatedSession: ExamSimulationSession = { ...session, status: 'Completed', endTime: Date.now(), score: scorePercentage, result: finalResult };
+    setSession(updatedSession);
+    await api.saveExamSimulation(user.uid, updatedSession);
+    if (onFinish) onFinish(finalResult);
   };
 
   const toggleFlag = (questionId: string) => {
@@ -3779,6 +3829,55 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
     );
   }
 
+  // Self-grade review screen
+  if (selfGradeReview && session) {
+    const q = session.questions[selfGradeReview.questionIndex];
+    const studentAnswer = session.answers[q?.id] || 'No answer provided';
+    const isLast = selfGradeReview.questionIndex === session.questions.length - 1;
+    return (
+      <div className="min-h-screen bg-[#FDFCF8] font-sans p-6 pb-24">
+        <div className="max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-serif italic">Self-Grade Review</h2>
+            <span className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">{selfGradeReview.questionIndex + 1} / {session.questions.length}</span>
+          </div>
+          <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-stone-100 space-y-6">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-2">Question</p>
+              <p className="text-base font-medium text-stone-900 leading-relaxed">{q?.question}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-2">Your Answer</p>
+              <p className="text-sm text-stone-600 bg-stone-50 rounded-2xl p-4">{studentAnswer}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-2">Suggested Answer</p>
+              <p className="text-sm text-stone-700 bg-emerald-50 rounded-2xl p-4 border border-emerald-100">{q?.suggestedAnswer}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                onClick={() => {
+                  const newMarks = { ...selfGradeReview.marks, [q.id]: true };
+                  if (isLast) handleSelfGradeComplete(newMarks);
+                  else setSelfGradeReview({ questionIndex: selfGradeReview.questionIndex + 1, marks: newMarks });
+                }}
+                className="py-4 bg-emerald-600 text-white rounded-2xl font-bold text-sm hover:bg-emerald-700 transition-all"
+              >✓ Got It</button>
+              <button
+                onClick={() => {
+                  const newMarks = { ...selfGradeReview.marks, [q.id]: false };
+                  if (isLast) handleSelfGradeComplete(newMarks);
+                  else setSelfGradeReview({ questionIndex: selfGradeReview.questionIndex + 1, marks: newMarks });
+                }}
+                className="py-4 bg-red-100 text-red-700 rounded-2xl font-bold text-sm hover:bg-red-200 transition-all"
+              >✗ Missed It</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (session && session.status === 'InProgress') {
     const currentQuestion = session.questions[session.currentIndex];
     const isFlagged = session.flaggedQuestions.includes(currentQuestion.id);
@@ -3801,16 +3900,17 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
               <div className="text-center">
                 <h2 className="text-lg font-serif italic">{course.name}</h2>
                 <div className="flex items-center justify-center gap-4 mt-1">
-                  <span className="text-[9px] font-bold text-stone-400 uppercase tracking-widest">Exam Simulation</span>
+                  <button
+                    onClick={() => setSelfGradeMode(m => !m)}
+                    className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full transition-all ${selfGradeMode ? 'bg-amber-100 text-amber-700' : 'text-stone-400 hover:text-stone-600'}`}
+                  >{selfGradeMode ? '✓ Self-Grade' : 'Self-Grade'}</button>
                   <span className="text-[9px] font-bold text-red-500 uppercase tracking-widest flex items-center gap-1">
                     <Clock className="w-3 h-3" /> {formatTime(timeLeft)}
                   </span>
                 </div>
               </div>
-              <button 
-                onClick={() => {
-                  if (confirm('Finish and submit your exam?')) handleFinishSimulation();
-                }}
+              <button
+                onClick={() => { if (confirm('Finish and submit your exam?')) handleFinishSimulation(); }}
                 className="bg-stone-900 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-stone-800 transition-all shadow-md shadow-stone-200"
               >
                 Finish
@@ -4109,6 +4209,16 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
               <p className="text-lg font-bold text-stone-900">{simulationQuestionCount} Mixed</p>
             </button>
           </div>
+
+          {/* Begin Exam button — top of setup so always visible */}
+          <button
+            onClick={startSimulation}
+            disabled={isSubmitting}
+            className="w-full py-5 bg-stone-900 text-white rounded-[2rem] font-bold text-lg hover:bg-stone-800 transition-all flex items-center justify-center gap-3 shadow-xl shadow-stone-200 mb-6 disabled:opacity-50"
+          >
+            <Play className="w-5 h-5 fill-current" />
+            Begin Exam — {simulationDuration} min · {simulationQuestionCount} Questions
+          </button>
 
           <div className="space-y-4 mb-12">
             <div className="flex items-center justify-between p-4 bg-stone-50 rounded-2xl border border-stone-100">
