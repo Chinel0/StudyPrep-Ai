@@ -1792,15 +1792,7 @@ const StudyCalendar: React.FC<StudyCalendarProps> = ({
     if (!importText.trim()) return;
     setIsImporting(true);
     try {
-      const aiRes = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Parse the following academic timeline into a JSON array of tasks. Today's date is ${format(new Date(), 'yyyy-MM-dd')}. If a date range is given (e.g. Week 1: NOW -> Apr 10), use the end date as the dueDate. If no year is given, assume 2026. Return ONLY a JSON array (no markdown) where each object has: title (string), courseName (string), dueDate (YYYY-MM-DD), priority ("High"|"Medium"|"Low"), status ("Not Started"), notes (string), subtasks (array of {id: string, title: string, completed: false}).\n\nTimeline:\n${importText}`
-        })
-      });
-      if (!aiRes.ok) throw new Error('AI import failed');
-      const { result: aiText } = await aiRes.json();
+      const aiText = await callAI(`Parse the following academic timeline into a JSON array of tasks. Today's date is ${format(new Date(), 'yyyy-MM-dd')}. If a date range is given (e.g. Week 1: NOW -> Apr 10), use the end date as the dueDate. If no year is given, assume 2026. Return ONLY a JSON array (no markdown) where each object has: title (string), courseName (string), dueDate (YYYY-MM-DD), priority ("High"|"Medium"|"Low"), status ("Not Started"), notes (string), subtasks (array of {id: string, title: string, completed: false}).\n\nTimeline:\n${importText}`);
       const importedTasks = parseAIJson(aiText);
       
       const savedTasks: AcademicTask[] = [];
@@ -2558,15 +2550,7 @@ const StudyCalendar: React.FC<StudyCalendarProps> = ({
   const autoDetectSemester = async () => {
     setIsDetecting(true);
     try {
-      const aiRes = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Based on these timetable entries, identify the start and end dates of the semester. Timetable: ${JSON.stringify(timetable)}. Return ONLY a JSON object (no markdown): { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" }`
-        })
-      });
-      if (!aiRes.ok) throw new Error('Auto-detect failed');
-      const { result: aiText } = await aiRes.json();
+      const aiText = await callAI(`Based on these timetable entries, identify the start and end dates of the semester. Timetable: ${JSON.stringify(timetable)}. Return ONLY a JSON object (no markdown): { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" }`);
       const result = parseAIJson(aiText);
       if (result.start) setSemesterStart(result.start);
       if (result.end) setSemesterEnd(result.end);
@@ -3295,15 +3279,7 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
     if (!importText.trim() || isGenerating) return;
     setIsGenerating(true);
     try {
-      const aiRes = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Generate ${simulationQuestionCount} exam questions based on this text: "${importText}". Return ONLY a JSON array (no markdown) of objects with: question (string), type ('MultipleChoice' or 'OpenEnded'), topic (string), options (string[] for MultipleChoice, null for OpenEnded), suggestedAnswer (string), points (number 5-20), source (string).`
-        })
-      });
-      if (!aiRes.ok) throw new Error('AI generation failed');
-      const { result: aiText } = await aiRes.json();
+      const aiText = await callAI(`Generate ${simulationQuestionCount} exam questions based on this text: "${importText}". Return ONLY a JSON array (no markdown) of objects with: question (string), type ('MultipleChoice' or 'OpenEnded'), topic (string), options (string[] for MultipleChoice, null for OpenEnded), suggestedAnswer (string), points (number 5-20), source (string).`);
       const newQuestions = parseAIJson(aiText).map((q: any) => ({
         ...q,
         id: Math.random().toString(36).substr(2, 9),
@@ -3343,13 +3319,7 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
 
       Return ONLY a JSON array (no markdown) of objects with: question (string), type ('Theory'|'Explanation'|'CodeExplanation'|'CodeWriting'|'Diagram'|'Calculation'|'MultipleChoice'), topic (string), options (string[] for MultipleChoice, null for others), suggestedAnswer (string), points (number), source (string).`;
 
-      const aiRes = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
-      });
-      if (!aiRes.ok) throw new Error('AI generation failed');
-      const { result: aiText } = await aiRes.json();
+      const aiText = await callAI(prompt);
       const newQuestions = parseAIJson(aiText).map((q: any) => ({
         ...q,
         id: Math.random().toString(36).substr(2, 9),
@@ -3441,13 +3411,7 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
 
         Return ONLY a JSON object (no markdown) with: score (0 to ${q.points}), correctPoints (string array), missingPoints (string array), feedback (string - improvement summary).`;
 
-        const aiRes = await fetch('/api/ai/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt })
-        });
-        if (!aiRes.ok) throw new Error('AI grading failed');
-        const { result: aiText } = await aiRes.json();
+        const aiText = await callAI(prompt);
         const evaluation = parseAIJson(aiText);
 
         evaluations[q.id] = {
@@ -4995,15 +4959,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
     if (!user || !course) return;
     setIsGeneratingFromFile(true);
     try {
-      const aiRes = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Generate 10 varied quiz questions based on the lecture file "${file.name}" for the course "${course.name}". Create questions covering key concepts, definitions, explanations, and applications from this topic. Return ONLY a JSON array (no markdown) with objects: { question (string), suggestedAnswer (string), topic (string), type (one of: Definition, Explanation, Comparison, Code, Calculation, Diagram) }.`
-        })
-      });
-      if (!aiRes.ok) throw new Error('AI generation failed');
-      const { result: aiText } = await aiRes.json();
+      const aiText = await callAI(`Generate 10 varied quiz questions based on the lecture file "${file.name}" for the course "${course.name}". Create questions covering key concepts, definitions, explanations, and applications from this topic. Return ONLY a JSON array (no markdown) with objects: { question (string), suggestedAnswer (string), topic (string), type (one of: Definition, Explanation, Comparison, Code, Calculation, Diagram) }.`);
       const generated = parseAIJson(aiText);
       const newQuestions: QuizQuestion[] = generated.map((q: any) => ({
         id: Math.random().toString(36).substr(2, 9),
@@ -5030,15 +4986,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
     if (!inlineAnswer.trim() || !user || !course) return;
     setIsInlineEvaluating(true);
     try {
-      const aiRes = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Evaluate this student's answer.\nQuestion: ${question.question}\nSuggested Answer: ${question.suggestedAnswer}\nStudent Answer: ${inlineAnswer}\n\nIf the student provides the correct logic or concept, mark it correct. Return ONLY a JSON object (no markdown) with: score (0-100), correctPoints (string array), missingPoints (string array), incorrectPoints (string array), feedback (string).`
-        })
-      });
-      if (!aiRes.ok) throw new Error('AI evaluation failed');
-      const { result: aiText } = await aiRes.json();
+      const aiText = await callAI(`Evaluate this student's answer.\nQuestion: ${question.question}\nSuggested Answer: ${question.suggestedAnswer}\nStudent Answer: ${inlineAnswer}\n\nIf the student provides the correct logic or concept, mark it correct. Return ONLY a JSON object (no markdown) with: score (0-100), correctPoints (string array), missingPoints (string array), incorrectPoints (string array), feedback (string).`);
       const result = parseAIJson(aiText);
       setInlineEvaluation({ id: Math.random().toString(36).substr(2,9), courseId: course.id, questionId: question.id, studentAnswer: inlineAnswer, ...result, timestamp: Date.now() });
       if (result.score >= 70) {
@@ -5088,16 +5036,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
 
         Return ONLY a JSON object (no markdown) with: score (0-100), correctPoints (string array), missingPoints (string array), incorrectPoints (string array - misconceptions), feedback (string - improvement summary).`;
 
-      const aiRes = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          pdf: pdfContext ? { base64: pdfContext.base64, mimeType: pdfContext.mimeType } : undefined
-        })
-      });
-      if (!aiRes.ok) throw new Error('AI evaluation failed');
-      const { result: aiText } = await aiRes.json();
+      const aiText = await callAI(prompt, pdfContext ? { base64: pdfContext.base64, mimeType: pdfContext.mimeType } : undefined);
       const evaluation = parseAIJson(aiText);
       
       // Save to DB
@@ -5226,16 +5165,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
 
       if (manualPdfContext) {
         // Use Claude for PDF extraction
-        const aiRes = await fetch('/api/ai/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: `Extract all quiz questions and answers from this PDF for the topic "${manualTopic}". If it's a past exam or question bank, extract every question and its answer/solution. Return ONLY a JSON array (no markdown) of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": string } where type is one of: Definition, Explanation, Comparison, Code, Calculation, Diagram. Keep questions and answers exactly as in the document.`,
-            pdf: { base64: manualPdfContext.base64, mimeType: manualPdfContext.mimeType }
-          })
-        });
-        if (!aiRes.ok) throw new Error('PDF extraction failed');
-        const { result: aiText } = await aiRes.json();
+        const aiText = await callAI(`Extract all quiz questions and answers from this PDF for the topic "${manualTopic}". If it's a past exam or question bank, extract every question and its answer/solution. Return ONLY a JSON array (no markdown) of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": string } where type is one of: Definition, Explanation, Comparison, Code, Calculation, Diagram. Keep questions and answers exactly as in the document.`, { base64: manualPdfContext.base64, mimeType: manualPdfContext.mimeType });
         const generated = parseAIJson(aiText);
         newQuestions = generated.map((q: any) => ({
           id: Math.random().toString(36).substr(2, 9),
@@ -6406,6 +6336,56 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   }
   console.error('Firestore Error Detailed:', errInfo);
   throw new Error(JSON.stringify(errInfo));
+}
+
+// Detect if running as installed mobile app (Capacitor native)
+const isNativeApp = (): boolean => {
+  try {
+    return typeof window !== 'undefined' &&
+      (window.location.protocol === 'capacitor:' ||
+       (window.location.protocol === 'https:' && window.location.hostname === 'localhost' && !window.location.port));
+  } catch { return false; }
+};
+
+// Unified AI caller — uses Express backend on PC, calls Anthropic directly on phone
+async function callAI(prompt: string, pdf?: { base64: string; mimeType: string }, max_tokens = 8192): Promise<string> {
+  if (isNativeApp()) {
+    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
+    const content: any[] = [];
+    if (pdf?.base64 && pdf?.mimeType) {
+      content.push({ type: 'document', source: { type: 'base64', media_type: pdf.mimeType, data: pdf.base64 } });
+    }
+    content.push({ type: 'text', text: prompt });
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens, messages: [{ role: 'user', content }] })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error?.message || 'Anthropic API call failed');
+    }
+    const data = await res.json();
+    return data.content[0]?.text ?? '';
+  } else {
+    const res = await fetch('/api/ai/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, pdf, max_tokens })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error || 'AI generation failed');
+    }
+    const { result } = await res.json();
+    return result;
+  }
 }
 
 // Robustly parse JSON from AI response text
@@ -8754,15 +8734,7 @@ export default function App() {
         return;
       }
 
-      const aiRes = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Generate a weekly exam practice schedule for these courses: ${examCourses.map(c => c.name).join(', ')}. Rules: one 90-min session per week per course, spread across different days (Monday-Sunday), use 24h time format. Return ONLY a JSON array (no markdown): [{"courseName": "...", "day": "...", "time": "..."}]`
-        })
-      });
-      if (!aiRes.ok) throw new Error('AI plan generation failed');
-      const { result: aiText } = await aiRes.json();
+      const aiText = await callAI(`Generate a weekly exam practice schedule for these courses: ${examCourses.map(c => c.name).join(', ')}. Rules: one 90-min session per week per course, spread across different days (Monday-Sunday), use 24h time format. Return ONLY a JSON array (no markdown): [{"courseName": "...", "day": "...", "time": "..."}]`);
       console.log("AI Response received");
       const plan = parseAIJson(aiText);
       
@@ -9641,15 +9613,7 @@ export default function App() {
   const generateDailyGoals = async () => {
     setIsGeneratingGoals(true);
     try {
-      const aiRes = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Based on the following student data, generate 3-5 specific, actionable daily study goals for today. Courses: ${courses.map(c => c.name).join(', ')}. Calendar Events: ${events.slice(0, 8).map(e => `${e.title} (${e.type}) on ${e.date}`).join(', ')}. Long term goal: Master all courses and excel in upcoming exams. Return ONLY a JSON array (no markdown): [{ "title": string, "category": "Study"|"Review"|"Practice"|"Exam" }]. Keep titles concise and motivating.`
-        })
-      });
-      if (!aiRes.ok) throw new Error('AI goals failed');
-      const { result: aiText } = await aiRes.json();
+      const aiText = await callAI(`Based on the following student data, generate 3-5 specific, actionable daily study goals for today. Courses: ${courses.map(c => c.name).join(', ')}. Calendar Events: ${events.slice(0, 8).map(e => `${e.title} (${e.type}) on ${e.date}`).join(', ')}. Long term goal: Master all courses and excel in upcoming exams. Return ONLY a JSON array (no markdown): [{ "title": string, "category": "Study"|"Review"|"Practice"|"Exam" }]. Keep titles concise and motivating.`);
       const result = parseAIJson(aiText);
       const today = new Date().toISOString().split('T')[0];
       const newGoals: DailyGoal[] = result.map((g: any) => ({
@@ -10229,14 +10193,8 @@ export default function App() {
         ? `Focus ONLY on the topic: "${context.specificTopic}" using available course context.`
         : `Focus on the following lecture(s): ${context.lectures.join(', ')}.`;
 
-      const callAI = async (prompt: string): Promise<any[]> => {
-        const res = await fetch('/api/ai/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt })
-        });
-        if (!res.ok) throw new Error('AI generation failed');
-        const { result: text } = await res.json();
+      const callAIArray = async (prompt: string): Promise<any[]> => {
+        const text = await callAI(prompt);
         return parseAIJson(text);
       };
 
@@ -10246,7 +10204,7 @@ export default function App() {
 
       if (options.flashcards) {
         setGenerationStep("Generating flashcards...");
-        const generated = await callAI(`Generate 10-15 high-quality flashcards for the course "${context.courseName}". ${sourceContext} Professor Style: ${context.professorStyle || 'Standard'}. Return ONLY a JSON array (no markdown): [{ "question": string, "answer": string, "topic": string }]`);
+        const generated = await callAIArray(`Generate 10-15 high-quality flashcards for the course "${context.courseName}". ${sourceContext} Professor Style: ${context.professorStyle || 'Standard'}. Return ONLY a JSON array (no markdown): [{ "question": string, "answer": string, "topic": string }]`);
         newFlashcards = generated.map((f: any) => ({
           id: Math.random().toString(36).substr(2, 9),
           courseId: selectedCourse.id,
@@ -10261,7 +10219,7 @@ export default function App() {
 
       if (options.quiz) {
         setGenerationStep("Generating quiz questions...");
-        const generated = await callAI(`Generate 5-8 high-quality quiz questions for the course "${context.courseName}". ${sourceContext} Professor Style: ${context.professorStyle || 'Standard'}. Past Exams: ${context.pastExams.join('\n') || 'None'}. Student Notes: ${context.studentNotes || 'None'}. Include challenging conceptual and practical questions. Return ONLY a JSON array (no markdown): [{ "question": string, "suggestedAnswer": string, "topic": string, "type": "Definition"|"Explanation"|"Comparison"|"Code"|"Calculation"|"Diagram" }]`);
+        const generated = await callAIArray(`Generate 5-8 high-quality quiz questions for the course "${context.courseName}". ${sourceContext} Professor Style: ${context.professorStyle || 'Standard'}. Past Exams: ${context.pastExams.join('\n') || 'None'}. Student Notes: ${context.studentNotes || 'None'}. Include challenging conceptual and practical questions. Return ONLY a JSON array (no markdown): [{ "question": string, "suggestedAnswer": string, "topic": string, "type": "Definition"|"Explanation"|"Comparison"|"Code"|"Calculation"|"Diagram" }]`);
         newQuizQuestions = generated.map((q: any) => ({
           id: Math.random().toString(36).substr(2, 9),
           courseId: selectedCourse.id,
@@ -10272,7 +10230,7 @@ export default function App() {
 
       if (options.exam) {
         setGenerationStep("Generating exam simulation questions...");
-        const generated = await callAI(`Generate 5-8 rigorous university exam questions for the course "${context.courseName}". ${sourceContext} Professor Style: ${context.professorStyle || 'Standard'}. Past Exams: ${context.pastExams.join('\n') || 'None'}. Include point values (5-20 pts), mix of Theory, Explanation, and Practical questions. Return ONLY a JSON array (no markdown): [{ "question": string, "suggestedAnswer": string, "topic": string, "type": "Theory"|"Explanation"|"CodeExplanation"|"CodeWriting"|"Diagram"|"Calculation"|"MultipleChoice", "points": number }]`);
+        const generated = await callAIArray(`Generate 5-8 rigorous university exam questions for the course "${context.courseName}". ${sourceContext} Professor Style: ${context.professorStyle || 'Standard'}. Past Exams: ${context.pastExams.join('\n') || 'None'}. Include point values (5-20 pts), mix of Theory, Explanation, and Practical questions. Return ONLY a JSON array (no markdown): [{ "question": string, "suggestedAnswer": string, "topic": string, "type": "Theory"|"Explanation"|"CodeExplanation"|"CodeWriting"|"Diagram"|"Calculation"|"MultipleChoice", "points": number }]`);
         newExamQuestions = generated.map((q: any) => ({
           id: Math.random().toString(36).substr(2, 9),
           courseId: selectedCourse.id,
@@ -12917,16 +12875,7 @@ export default function App() {
                           if (!importText.trim()) return;
                           setIsImportingAI(true);
                           try {
-                            const aiRes = await fetch('/api/ai/generate', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                prompt: `Extract flashcards from the following text. Return ONLY a JSON array (no markdown) of objects with "question" and "answer" properties.\nText: ${importText}`
-                              })
-                            });
-                            if (!aiRes.ok) throw new Error('AI import failed');
-                            const { result: aiRawText } = await aiRes.json();
-                            const text = aiRawText;
+                            const text = await callAI(`Extract flashcards from the following text. Return ONLY a JSON array (no markdown) of objects with "question" and "answer" properties.\nText: ${importText}`);
 
                             // Extract JSON from response
                             if (text) {
