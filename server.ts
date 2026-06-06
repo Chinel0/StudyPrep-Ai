@@ -4,6 +4,7 @@ import { dirname, join } from "path";
 const __envdir = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__envdir, ".env") });
 import express from "express";
+import Anthropic from "@anthropic-ai/sdk";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
@@ -566,6 +567,44 @@ async function startServer() {
     db.prepare("INSERT OR REPLACE INTO evaluations (id, courseId, questionId, studentAnswer, score, correctPoints, missingPoints, feedback, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .run(id, courseId, questionId, studentAnswer, score, JSON.stringify(correctPoints), JSON.stringify(missingPoints), feedback, timestamp);
     res.json({ success: true });
+  });
+
+  // Claude AI proxy endpoint
+  app.post("/api/ai/generate", async (req, res) => {
+    const { prompt, pdf, max_tokens } = req.body;
+    if (!prompt) return res.status(400).json({ error: "Missing prompt" });
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey || apiKey === "paste_your_key_here") {
+      return res.status(503).json({ error: "ANTHROPIC_API_KEY not configured. Add your key to the .env file." });
+    }
+
+    try {
+      const anthropic = new Anthropic({ apiKey });
+
+      const contentParts: Anthropic.MessageParam["content"] = [];
+
+      if (pdf?.base64 && pdf?.mimeType) {
+        contentParts.push({
+          type: "document",
+          source: { type: "base64", media_type: pdf.mimeType as "application/pdf", data: pdf.base64 }
+        } as any);
+      }
+
+      contentParts.push({ type: "text", text: prompt });
+
+      const response = await anthropic.messages.create({
+        model: "claude-haiku-4-5",
+        max_tokens: max_tokens || 8192,
+        messages: [{ role: "user", content: contentParts }]
+      });
+
+      const text = response.content[0].type === "text" ? response.content[0].text : "";
+      res.json({ result: text });
+    } catch (err: any) {
+      console.error("Claude API error:", err);
+      res.status(500).json({ error: err.message || "AI generation failed" });
+    }
   });
 
   // Vite middleware for development

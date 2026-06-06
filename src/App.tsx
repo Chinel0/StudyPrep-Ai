@@ -1792,61 +1792,16 @@ const StudyCalendar: React.FC<StudyCalendarProps> = ({
     if (!importText.trim()) return;
     setIsImporting(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const model = ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: `Parse the following academic timeline into a JSON array of tasks. 
-Each task should follow this schema:
-{
-  "title": string,
-  "courseName": string,
-  "dueDate": "YYYY-MM-DD",
-  "priority": "High" | "Medium" | "Low",
-  "status": "Not Started",
-  "notes": string,
-  "subtasks": { "id": string, "title": string, "completed": false }[]
-}
-
-Today's date is ${format(new Date(), 'yyyy-MM-dd')}.
-If a date range is given (e.g. Week 1: NOW -> Apr 10), use the end date as the dueDate.
-If no year is given, assume 2026.
-
-Timeline:
-${importText}`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                courseName: { type: Type.STRING },
-                dueDate: { type: Type.STRING },
-                priority: { type: Type.STRING, enum: ["High", "Medium", "Low"] },
-                status: { type: Type.STRING, enum: ["Not Started"] },
-                notes: { type: Type.STRING },
-                subtasks: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      id: { type: Type.STRING },
-                      title: { type: Type.STRING },
-                      completed: { type: Type.BOOLEAN }
-                    },
-                    required: ["id", "title", "completed"]
-                  }
-                }
-              },
-              required: ["title", "courseName", "dueDate", "priority", "status", "subtasks"]
-            }
-          }
-        }
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Parse the following academic timeline into a JSON array of tasks. Today's date is ${format(new Date(), 'yyyy-MM-dd')}. If a date range is given (e.g. Week 1: NOW -> Apr 10), use the end date as the dueDate. If no year is given, assume 2026. Return ONLY a JSON array (no markdown) where each object has: title (string), courseName (string), dueDate (YYYY-MM-DD), priority ("High"|"Medium"|"Low"), status ("Not Started"), notes (string), subtasks (array of {id: string, title: string, completed: false}).\n\nTimeline:\n${importText}`
+        })
       });
-
-      const result = await model;
-      const importedTasks = JSON.parse(result.text);
+      if (!aiRes.ok) throw new Error('AI import failed');
+      const { result: aiText } = await aiRes.json();
+      const importedTasks = parseAIJson(aiText);
       
       const savedTasks: AcademicTask[] = [];
       const formatDate = (dateStr: string) => {
@@ -2603,19 +2558,16 @@ ${importText}`,
   const autoDetectSemester = async () => {
     setIsDetecting(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const model = "gemini-2.0-flash";
-      const prompt = `Based on these timetable entries, identify the start and end dates of the semester. 
-      Timetable: ${JSON.stringify(timetable)}
-      Return as JSON: { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" }`;
-      
-      const response = await ai.models.generateContent({
-        model,
-        contents: [{ parts: [{ text: prompt }] }],
-        config: { responseMimeType: "application/json" }
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Based on these timetable entries, identify the start and end dates of the semester. Timetable: ${JSON.stringify(timetable)}. Return ONLY a JSON object (no markdown): { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" }`
+        })
       });
-      
-      const result = JSON.parse(response.text || "{}");
+      if (!aiRes.ok) throw new Error('Auto-detect failed');
+      const { result: aiText } = await aiRes.json();
+      const result = parseAIJson(aiText);
       if (result.start) setSemesterStart(result.start);
       if (result.end) setSemesterEnd(result.end);
     } catch (e) {
@@ -3304,6 +3256,8 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
   const [alertConfig, setAlertConfig] = useState<{ open: boolean, title: string, message: string }>({ open: false, title: '', message: '' });
   const [selfGradeMode, setSelfGradeMode] = useState(false);
   const [selfGradeReview, setSelfGradeReview] = useState<{ questionIndex: number; marks: Record<string, boolean> } | null>(null);
+  const [isManualExamAddOpen, setIsManualExamAddOpen] = useState(false);
+  const [manualExamQ, setManualExamQ] = useState<{ question: string; suggestedAnswer: string; topic: string; type: ExamQuestion['type']; points: number }>({ question: '', suggestedAnswer: '', topic: '', type: 'Theory', points: 10 });
 
   const showAlert = (title: string, message: string) => {
     setAlertConfig({ open: true, title, message });
@@ -3341,15 +3295,16 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
     if (!importText.trim() || isGenerating) return;
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: `Generate ${simulationQuestionCount} exam questions based on this text: "${importText}". 
-        Return ONLY a JSON array of objects with these fields: question (string), type ('MultipleChoice' or 'OpenEnded'), topic (string), options (string[] for MultipleChoice, null for OpenEnded), suggestedAnswer (string), points (number), source (string).`,
-        config: { responseMimeType: "application/json" }
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Generate ${simulationQuestionCount} exam questions based on this text: "${importText}". Return ONLY a JSON array (no markdown) of objects with: question (string), type ('MultipleChoice' or 'OpenEnded'), topic (string), options (string[] for MultipleChoice, null for OpenEnded), suggestedAnswer (string), points (number 5-20), source (string).`
+        })
       });
-
-      const newQuestions = JSON.parse(response.text || '[]').map((q: any) => ({
+      if (!aiRes.ok) throw new Error('AI generation failed');
+      const { result: aiText } = await aiRes.json();
+      const newQuestions = parseAIJson(aiText).map((q: any) => ({
         ...q,
         id: Math.random().toString(36).substr(2, 9),
         courseId: course.id,
@@ -3371,63 +3326,31 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
   const generateAIExam = async () => {
     setIsGenerating(true);
     try {
-      if (!process.env.GEMINI_API_KEY) {
-        throw new Error("Gemini API Key is missing.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-2.0-flash";
-
       const filteredLectures = lectureFiles.filter(f => f.courseId === course.id);
-      
-      // If a specific source is selected, prioritize it
       let targetLectures = filteredLectures;
       if (simulationFilter.type === 'Source' && simulationFilter.value) {
         targetLectures = filteredLectures.filter(f => f.name === simulationFilter.value);
       }
 
-      const filePartsPromises = targetLectures.map(async f => {
-        if (f.fileUrl && f.fileUrl.startsWith('http')) {
-          const data = await fetchAsBase64(f.fileUrl);
-          if (data) {
-            return {
-              inlineData: {
-                mimeType: data.mimeType,
-                data: data.data
-              }
-            };
-          }
-        }
-        return { text: `Lecture File Content (Reference): ${f.name}` };
-      });
-
-      const fileParts = await Promise.all(filePartsPromises);
+      const lectureNames = targetLectures.map(f => f.name).join(', ') || 'General course material';
       const pastExamContext = pastQuestions.filter(pq => pq.courseId === course.id).map(pq => pq.content).join('\n');
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: [{ 
-          parts: [
-            ...fileParts,
-            { text: `Generate ${simulationQuestionCount} high-quality university-level exam questions for the course "${course.name}". 
-            Focus on: ${simulationFilter.type === 'All' ? 'all topics' : (simulationFilter.type === 'Topic' ? 'the topic: ' + simulationFilter.value : 'the lecture file: ' + simulationFilter.value)}.
-            Professor Style: ${professorStyle || 'Standard'}
-            Past Exam Context: ${pastExamContext || 'No past exams provided.'}
-            
-            Return ONLY a JSON array of objects with these fields: 
-            question (string), 
-            type ('Theory' | 'Explanation' | 'CodeExplanation' | 'CodeWriting' | 'Diagram' | 'Calculation' | 'MultipleChoice'), 
-            topic (string), 
-            options (string[] for MultipleChoice, null for others), 
-            suggestedAnswer (string), 
-            points (number), 
-            source (string).` }
-          ] 
-        }],
-        config: { responseMimeType: "application/json" }
-      });
+      const prompt = `Generate ${simulationQuestionCount} high-quality university-level exam questions for the course "${course.name}".
+      Lecture sources available: ${lectureNames}
+      Focus on: ${simulationFilter.type === 'All' ? 'all topics' : (simulationFilter.type === 'Topic' ? 'the topic: ' + simulationFilter.value : 'the lecture: ' + simulationFilter.value)}
+      Professor Style: ${professorStyle || 'Standard'}
+      Past Exam Context: ${pastExamContext || 'No past exams provided.'}
 
-      const newQuestions = JSON.parse(response.text || '[]').map((q: any) => ({
+      Return ONLY a JSON array (no markdown) of objects with: question (string), type ('Theory'|'Explanation'|'CodeExplanation'|'CodeWriting'|'Diagram'|'Calculation'|'MultipleChoice'), topic (string), options (string[] for MultipleChoice, null for others), suggestedAnswer (string), points (number), source (string).`;
+
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      if (!aiRes.ok) throw new Error('AI generation failed');
+      const { result: aiText } = await aiRes.json();
+      const newQuestions = parseAIJson(aiText).map((q: any) => ({
         ...q,
         id: Math.random().toString(36).substr(2, 9),
         courseId: course.id,
@@ -3440,7 +3363,7 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
       return newQuestions;
     } catch (error) {
       console.error("Error generating exam:", error);
-      showAlert("Error", "Failed to generate exam. Please check your connection and API key.");
+      showAlert("Error", "Failed to generate exam. Please check your connection and try again.");
       return null;
     } finally {
       setIsGenerating(false);
@@ -3502,62 +3425,41 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
     const timeUsedSeconds = (session.durationMinutes * 60) - timeLeft;
 
     try {
-      if (!process.env.GEMINI_API_KEY) {
-        throw new Error("Gemini API Key is missing.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-2.0-flash";
-
       const evaluations: Record<string, QuizEvaluation> = {};
       let correctCount = 0;
 
-      // Evaluate each question
+      // Evaluate each question via Claude
       const evalPromises = session.questions.map(async (q) => {
         const studentAnswer = session.answers[q.id] || "No answer provided.";
-        
+
         const prompt = `Evaluate this student's exam answer for the course "${course.name}".
         Question: ${q.question}
         Type: ${q.type}
         Points: ${q.points}
         Suggested Answer: ${q.suggestedAnswer}
         Student Answer: ${studentAnswer}
-        
-        Provide feedback in JSON format with:
-        - score (0 to ${q.points})
-        - correctPoints (array of strings)
-        - missingPoints (array of strings)
-        - feedback (a summary of suggested improvement)`;
 
-        const response = await ai.models.generateContent({
-          model,
-          contents: [{ parts: [{ text: prompt }] }],
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                score: { type: Type.NUMBER },
-                correctPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-                missingPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-                feedback: { type: Type.STRING }
-              },
-              required: ["score", "correctPoints", "missingPoints", "feedback"]
-            }
-          }
+        Return ONLY a JSON object (no markdown) with: score (0 to ${q.points}), correctPoints (string array), missingPoints (string array), feedback (string - improvement summary).`;
+
+        const aiRes = await fetch('/api/ai/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt })
         });
+        if (!aiRes.ok) throw new Error('AI grading failed');
+        const { result: aiText } = await aiRes.json();
+        const evaluation = parseAIJson(aiText);
 
-        const evaluation = JSON.parse(response.text || '{}');
         evaluations[q.id] = {
           ...evaluation,
           id: Math.random().toString(36).substr(2, 9),
           courseId: course.id,
           questionId: q.id,
           studentAnswer,
-          incorrectPoints: [], // Not used in this schema but required by interface
+          incorrectPoints: [],
           timestamp: Date.now()
         };
-        
+
         if (evaluation.score >= (q.points * 0.7)) {
           correctCount++;
         }
@@ -4273,14 +4175,21 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
                   <Sparkles className="w-3 h-3" />
                   Generate with AI
                 </button>
-                <button 
+                <button
                   onClick={() => setIsImportModalOpen(true)}
                   className="text-[10px] font-bold text-stone-900 uppercase tracking-widest hover:underline flex items-center gap-1"
                 >
                   <Plus className="w-3 h-3" />
                   Import Text
                 </button>
-                <button 
+                <button
+                  onClick={() => { setManualExamQ({ question: '', suggestedAnswer: '', topic: '', type: 'Theory', points: 10 }); setIsManualExamAddOpen(true); }}
+                  className="text-[10px] font-bold text-stone-900 uppercase tracking-widest hover:underline flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add Manually
+                </button>
+                <button
                   onClick={() => { setSimulationFilter({ type: 'Topic' }); setIsFilterModalOpen(true); }}
                   className="text-[10px] font-bold text-stone-900 uppercase tracking-widest hover:underline flex items-center gap-1"
                 >
@@ -4435,6 +4344,116 @@ const ExamSimulation: React.FC<ExamSimulationProps> = ({
                     Generate
                   </button>
                 </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Manual Exam Question Modal */}
+        <AnimatePresence>
+          {isManualExamAddOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsManualExamAddOpen(false)}
+                className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="relative w-full max-w-lg bg-white rounded-[2.5rem] p-8 shadow-2xl overflow-y-auto max-h-[90vh]"
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-stone-900">Add Question Manually</h3>
+                  <button onClick={() => setIsManualExamAddOpen(false)} className="p-2 hover:bg-stone-50 rounded-full transition-colors">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-2">Question *</label>
+                    <textarea
+                      value={manualExamQ.question}
+                      onChange={e => setManualExamQ(p => ({ ...p, question: e.target.value }))}
+                      placeholder="Type your question here..."
+                      className="w-full h-28 p-4 bg-stone-50 border border-stone-100 rounded-2xl focus:ring-2 focus:ring-stone-900 outline-none resize-none text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-2">Model Answer *</label>
+                    <textarea
+                      value={manualExamQ.suggestedAnswer}
+                      onChange={e => setManualExamQ(p => ({ ...p, suggestedAnswer: e.target.value }))}
+                      placeholder="Type the expected answer..."
+                      className="w-full h-28 p-4 bg-stone-50 border border-stone-100 rounded-2xl focus:ring-2 focus:ring-stone-900 outline-none resize-none text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-2">Topic</label>
+                      <input
+                        value={manualExamQ.topic}
+                        onChange={e => setManualExamQ(p => ({ ...p, topic: e.target.value }))}
+                        placeholder="e.g. Chapter 3"
+                        className="w-full p-3 bg-stone-50 border border-stone-100 rounded-2xl focus:ring-2 focus:ring-stone-900 outline-none text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-2">Points</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={manualExamQ.points}
+                        onChange={e => setManualExamQ(p => ({ ...p, points: Math.max(1, parseInt(e.target.value) || 1) }))}
+                        className="w-full p-3 bg-stone-50 border border-stone-100 rounded-2xl focus:ring-2 focus:ring-stone-900 outline-none text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-2">Type</label>
+                    <select
+                      value={manualExamQ.type}
+                      onChange={e => setManualExamQ(p => ({ ...p, type: e.target.value as ExamQuestion['type'] }))}
+                      className="w-full p-3 bg-stone-50 border border-stone-100 rounded-2xl focus:ring-2 focus:ring-stone-900 outline-none text-sm"
+                    >
+                      <option value="Theory">Theory</option>
+                      <option value="Explanation">Explanation</option>
+                      <option value="CodeExplanation">Code Explanation</option>
+                      <option value="CodeWriting">Code Writing</option>
+                      <option value="Diagram">Diagram</option>
+                      <option value="Calculation">Calculation</option>
+                      <option value="MultipleChoice">Multiple Choice</option>
+                    </select>
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!manualExamQ.question.trim() || !manualExamQ.suggestedAnswer.trim() || !user) return;
+                    const newQ: ExamQuestion = {
+                      id: Math.random().toString(36).substr(2, 9),
+                      courseId: course.id,
+                      question: manualExamQ.question.trim(),
+                      suggestedAnswer: manualExamQ.suggestedAnswer.trim(),
+                      topic: manualExamQ.topic.trim() || 'General',
+                      type: manualExamQ.type,
+                      points: manualExamQ.points,
+                      source: 'Manual Entry'
+                    };
+                    await api.saveExamQuestion(user.uid, newQ);
+                    if (onAddQuestions) onAddQuestions([newQ]);
+                    setManualExamQ({ question: '', suggestedAnswer: '', topic: '', type: 'Theory', points: 10 });
+                    setIsManualExamAddOpen(false);
+                    showAlert('Success', 'Question added successfully!');
+                  }}
+                  disabled={!manualExamQ.question.trim() || !manualExamQ.suggestedAnswer.trim()}
+                  className="w-full mt-6 py-4 bg-stone-900 text-white rounded-2xl font-bold text-sm hover:bg-stone-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  Save Question
+                </button>
               </motion.div>
             </div>
           )}
@@ -4976,28 +4995,16 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
     if (!user || !course) return;
     setIsGeneratingFromFile(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: `Generate 10 varied quiz questions based on the lecture file "${file.name}" for the course "${course.name}". Create questions covering key concepts, definitions, explanations, and applications from this topic. Return a JSON array with objects: { question, suggestedAnswer, topic, type } where type is one of: Definition, Explanation, Comparison, Code, Calculation, Diagram.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                question: { type: Type.STRING },
-                suggestedAnswer: { type: Type.STRING },
-                topic: { type: Type.STRING },
-                type: { type: Type.STRING, enum: ["Definition", "Explanation", "Comparison", "Code", "Calculation", "Diagram"] }
-              },
-              required: ["question", "suggestedAnswer", "topic", "type"]
-            }
-          }
-        }
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Generate 10 varied quiz questions based on the lecture file "${file.name}" for the course "${course.name}". Create questions covering key concepts, definitions, explanations, and applications from this topic. Return ONLY a JSON array (no markdown) with objects: { question (string), suggestedAnswer (string), topic (string), type (one of: Definition, Explanation, Comparison, Code, Calculation, Diagram) }.`
+        })
       });
-      const generated = JSON.parse(response.text || '[]');
+      if (!aiRes.ok) throw new Error('AI generation failed');
+      const { result: aiText } = await aiRes.json();
+      const generated = parseAIJson(aiText);
       const newQuestions: QuizQuestion[] = generated.map((q: any) => ({
         id: Math.random().toString(36).substr(2, 9),
         courseId: course.id,
@@ -5023,26 +5030,16 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
     if (!inlineAnswer.trim() || !user || !course) return;
     setIsInlineEvaluating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: `Evaluate this student's answer.\nQuestion: ${question.question}\nSuggested Answer: ${question.suggestedAnswer}\nStudent Answer: ${inlineAnswer}\n\nIf the student provides the correct logic or concept, mark it correct. Return JSON with: score (0-100), correctPoints (array), missingPoints (array), incorrectPoints (array), feedback (string).`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              score: { type: Type.NUMBER },
-              correctPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-              missingPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-              incorrectPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-              feedback: { type: Type.STRING }
-            },
-            required: ["score", "correctPoints", "missingPoints", "incorrectPoints", "feedback"]
-          }
-        }
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Evaluate this student's answer.\nQuestion: ${question.question}\nSuggested Answer: ${question.suggestedAnswer}\nStudent Answer: ${inlineAnswer}\n\nIf the student provides the correct logic or concept, mark it correct. Return ONLY a JSON object (no markdown) with: score (0-100), correctPoints (string array), missingPoints (string array), incorrectPoints (string array), feedback (string).`
+        })
       });
-      const result = JSON.parse(response.text || '{}');
+      if (!aiRes.ok) throw new Error('AI evaluation failed');
+      const { result: aiText } = await aiRes.json();
+      const result = parseAIJson(aiText);
       setInlineEvaluation({ id: Math.random().toString(36).substr(2,9), courseId: course.id, questionId: question.id, studentAnswer: inlineAnswer, ...result, timestamp: Date.now() });
       if (result.score >= 70) {
         setDailyStats(prev => ({ ...prev, practiced: prev.practiced + 1, correct: prev.correct + 1, accuracy: Math.round(((prev.correct + 1) / (prev.practiced + 1)) * 100) }));
@@ -5067,10 +5064,8 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      
       const isCodeQuestion = currentQuestion.type === 'Code' || currentQuestion.type.toLowerCase().includes('code');
-      
+
       const pdfNote = pdfContext
         ? `\n\nREFERENCE MATERIAL: The student has attached a PDF document ("${pdfContext.fileName}") as study context. Use it as the authoritative source when judging correctness, but do NOT require the student to copy it verbatim — credit correct concepts and logic.`
         : '';
@@ -5083,12 +5078,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
 
         CRITICAL: Analyze the code for syntax errors, logic issues, missing brackets, or wrong structure.
 
-        Provide feedback in JSON format with:
-        - score (0-100)
-        - correctPoints (array of strings)
-        - missingPoints (array of strings)
-        - incorrectPoints (array of strings - specifically syntax errors or logic bugs)
-        - feedback (a summary of suggested improvement and a corrected version of the code if errors were found)`
+        Return ONLY a JSON object (no markdown) with: score (0-100), correctPoints (string array), missingPoints (string array), incorrectPoints (string array - syntax errors or logic bugs), feedback (string - improvement summary and corrected code if needed).`
         : `Evaluate this student's answer to the following question.
         Question: ${currentQuestion.question}
         Suggested Answer: ${currentQuestion.suggestedAnswer}
@@ -5096,39 +5086,19 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
 
         CRITICAL: The student's answer does NOT have to be word-for-word. If the student provides the correct LOGIC or CONCEPT, mark it as correct.
 
-        Provide feedback in JSON format with:
-        - score (0-100)
-        - correctPoints (array of strings)
-        - missingPoints (array of strings)
-        - incorrectPoints (array of strings - specifically things the student got wrong or misconceptions)
-        - feedback (a summary of suggested improvement)`;
+        Return ONLY a JSON object (no markdown) with: score (0-100), correctPoints (string array), missingPoints (string array), incorrectPoints (string array - misconceptions), feedback (string - improvement summary).`;
 
-      const contentParts: any[] = [];
-      if (pdfContext) {
-        contentParts.push({ inlineData: { mimeType: pdfContext.mimeType, data: pdfContext.base64 } });
-      }
-      contentParts.push({ text: prompt });
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: [{ parts: contentParts }],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              score: { type: Type.NUMBER },
-              correctPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-              missingPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-              incorrectPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-              feedback: { type: Type.STRING }
-            },
-            required: ["score", "correctPoints", "missingPoints", "incorrectPoints", "feedback"]
-          }
-        }
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          pdf: pdfContext ? { base64: pdfContext.base64, mimeType: pdfContext.mimeType } : undefined
+        })
       });
-
-      const evaluation = JSON.parse(response.text || '{}');
+      if (!aiRes.ok) throw new Error('AI evaluation failed');
+      const { result: aiText } = await aiRes.json();
+      const evaluation = parseAIJson(aiText);
       
       // Save to DB
       if (course && course.id && user) {
@@ -5252,58 +5222,90 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
 
     setIsParsing(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      let newQuestions: QuizQuestion[];
 
-      let contents: any;
       if (manualPdfContext) {
-        contents = [
-          { text: `Extract all quiz questions and answers from this PDF for the topic "${manualTopic}". If it's a past exam or question bank, extract every question and its answer/solution. Return a JSON array of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": string } where type is one of: Definition, Explanation, Comparison, Code, Calculation, Diagram. Keep questions and answers exactly as in the document.` },
-          { inlineData: { mimeType: manualPdfContext.mimeType, data: manualPdfContext.base64 } }
-        ];
+        // Use Claude for PDF extraction
+        const aiRes = await fetch('/api/ai/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: `Extract all quiz questions and answers from this PDF for the topic "${manualTopic}". If it's a past exam or question bank, extract every question and its answer/solution. Return ONLY a JSON array (no markdown) of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": string } where type is one of: Definition, Explanation, Comparison, Code, Calculation, Diagram. Keep questions and answers exactly as in the document.`,
+            pdf: { base64: manualPdfContext.base64, mimeType: manualPdfContext.mimeType }
+          })
+        });
+        if (!aiRes.ok) throw new Error('PDF extraction failed');
+        const { result: aiText } = await aiRes.json();
+        const generated = parseAIJson(aiText);
+        newQuestions = generated.map((q: any) => ({
+          id: Math.random().toString(36).substr(2, 9),
+          courseId: course.id,
+          ...q,
+          source: manualPdfContext.fileName
+        }));
       } else {
-        contents = `Parse the following text into a JSON array of quiz questions for the topic "${manualTopic}".
-      The input format is "q:" for questions and "a:" for answers. There might be multiple questions and answers.
+        // Parse any common Q&A format locally — no AI needed
+        const text = manualInput.trim();
+        const pairs: { question: string; answer: string }[] = [];
 
-      Input Text:
-      ${manualInput}
-
-      CRITICAL:
-      - Keep the questions and answers exactly as provided.
-      - Separate each individual question and answer pair.
-      - Assign a relevant "type" to each question from: "Definition", "Explanation", "Comparison", "Code", "Calculation", "Diagram".
-
-      Return as a JSON array of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": string }`;
-      }
-      const prompt = contents;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                question: { type: Type.STRING },
-                suggestedAnswer: { type: Type.STRING },
-                topic: { type: Type.STRING },
-                type: { type: Type.STRING, enum: ["Definition", "Explanation", "Comparison", "Code", "Calculation", "Diagram"] }
-              },
-              required: ["question", "suggestedAnswer", "topic", "type"]
+        // Format 1: Q1. question / Answer: answer  (numbered style)
+        if (/Q\d+[\.\:]/i.test(text)) {
+          const blocks = text.split(/(?=Q\d+[\.\:])/i).filter(b => /^Q\d+[\.\:]/i.test(b.trim()));
+          for (const block of blocks) {
+            const qMatch = block.match(/^Q\d+[\.\:]\s*([\s\S]*?)(?=\nAnswer\s*:|$)/i);
+            const aMatch = block.match(/\nAnswer\s*:\s*([\s\S]*?)(?=\nQ\d+[\.\:]|$)/i);
+            if (qMatch && aMatch) {
+              const question = qMatch[1].trim();
+              const answer = aMatch[1].trim();
+              if (question && answer) pairs.push({ question, answer });
             }
           }
         }
-      });
 
-      const generated = JSON.parse(response.text || '[]');
-      const newQuestions: QuizQuestion[] = generated.map((q: any) => ({
-        id: Math.random().toString(36).substr(2, 9),
-        courseId: course.id,
-        ...q,
-        source: manualPdfContext ? manualPdfContext.fileName : 'Manual Entry'
-      }));
+        // Format 2: Q: question / A: answer  (simple label style)
+        if (pairs.length === 0) {
+          const blocks = text.split(/(?=\bq\s*:)/i).filter(b => b.trim());
+          for (const block of blocks) {
+            const qMatch = block.match(/^q\s*:\s*([\s\S]*?)(?=\ba\s*:|$)/i);
+            const aMatch = block.match(/\ba\s*:\s*([\s\S]*)$/i);
+            if (qMatch && aMatch) {
+              const question = qMatch[1].trim();
+              const answer = aMatch[1].trim();
+              if (question && answer) pairs.push({ question, answer });
+            }
+          }
+        }
+
+        // Format 3: Question: ... Answer: ...  (word label style)
+        if (pairs.length === 0) {
+          const blocks = text.split(/(?=\bQuestion\s*:)/i).filter(b => b.trim());
+          for (const block of blocks) {
+            const qMatch = block.match(/^Question\s*:\s*([\s\S]*?)(?=\bAnswer\s*:|$)/i);
+            const aMatch = block.match(/\bAnswer\s*:\s*([\s\S]*)$/i);
+            if (qMatch && aMatch) {
+              const question = qMatch[1].trim();
+              const answer = aMatch[1].trim();
+              if (question && answer) pairs.push({ question, answer });
+            }
+          }
+        }
+
+        if (pairs.length === 0) {
+          alert('No valid Q&A pairs found. Supported formats:\n\nNumbered: Q1. question\nAnswer: answer\n\nSimple: q: question\na: answer\n\nLabel: Question: ...\nAnswer: ...');
+          setIsParsing(false);
+          return;
+        }
+
+        newQuestions = pairs.map(pair => ({
+          id: Math.random().toString(36).substr(2, 9),
+          courseId: course.id,
+          question: pair.question,
+          suggestedAnswer: pair.answer,
+          topic: manualTopic,
+          type: 'Definition' as const,
+          source: 'Manual Entry'
+        }));
+      }
 
       if (newQuestions.length > 0) {
         await Promise.all(newQuestions.map(q => api.saveQuizQuestion(user.uid, q)));
@@ -5316,6 +5318,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
       setIsManualAdding(false);
     } catch (error) {
       console.error("Manual parsing failed:", error);
+      alert('Failed to save questions. Please try again.');
     } finally {
       setIsParsing(false);
     }
@@ -5396,7 +5399,7 @@ const QuizPractice: React.FC<QuizPracticeProps> = ({
                     <div className="flex-1 h-px bg-stone-100" />
                   </div>
                   <textarea value={manualInput} onChange={e => setManualInput(e.target.value)}
-                    placeholder={'q: What is normalisation?\na: The process of organising a database to reduce redundancy.\n\nq: What is a primary key?\na: A unique identifier for each record in a table.'}
+                    placeholder={'Paste your questions in any format:\n\nQ1. What is normalisation?\nAnswer:\nThe process of organising a database to reduce redundancy.\n\nQ2. What is a primary key?\nAnswer:\nA unique identifier for each record in a table.\n\n— or —\n\nq: What is normalisation?\na: The process of organising a database...'}
                     className="w-full h-64 bg-stone-50 rounded-2xl p-5 text-sm font-mono text-stone-800 placeholder-stone-300 focus:ring-2 focus:ring-stone-900 outline-none resize-none"
                   />
                 </>
@@ -6403,6 +6406,25 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   }
   console.error('Firestore Error Detailed:', errInfo);
   throw new Error(JSON.stringify(errInfo));
+}
+
+// Robustly parse JSON from AI response text
+function parseAIJson(text: string): any {
+  const cleaned = text.replace(/```json\n?|\n?```/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Try extracting the first JSON array or object
+    const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      try { return JSON.parse(arrMatch[0]); } catch {}
+    }
+    const objMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (objMatch) {
+      try { return JSON.parse(objMatch[0]); } catch {}
+    }
+    throw new Error('Could not parse AI response as JSON');
+  }
 }
 
 // API Services
@@ -8724,33 +8746,25 @@ export default function App() {
     console.log("Starting AI plan generation...");
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
       const examCourses = courses.filter(c => c.type === 'Exam');
-      
+
       if (examCourses.length === 0) {
         console.log("No exam-based courses found.");
         setIsGeneratingWeeklyPlan(false);
         return;
       }
 
-      const prompt = `
-        Generate a weekly exam practice schedule for these courses: ${examCourses.map(c => c.name).join(', ')}.
-        
-        Rules:
-        - One 90-min session per week for each course.
-        - Spread across different days (Monday-Sunday).
-        - Use 24h format for time (e.g. 14:00, 18:30).
-        - Return ONLY a JSON array: [{"courseName": "...", "day": "...", "time": "..."}]
-      `;
-
-      const result = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: prompt,
-        config: { responseMimeType: "application/json" }
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Generate a weekly exam practice schedule for these courses: ${examCourses.map(c => c.name).join(', ')}. Rules: one 90-min session per week per course, spread across different days (Monday-Sunday), use 24h time format. Return ONLY a JSON array (no markdown): [{"courseName": "...", "day": "...", "time": "..."}]`
+        })
       });
-
+      if (!aiRes.ok) throw new Error('AI plan generation failed');
+      const { result: aiText } = await aiRes.json();
       console.log("AI Response received");
-      const plan = JSON.parse(result.text);
+      const plan = parseAIJson(aiText);
       
       const newSimulations: WeeklySimulation[] = plan.map((item: any) => {
         const course = examCourses.find(c => c.name === item.courseName) || examCourses[0];
@@ -9627,26 +9641,16 @@ export default function App() {
   const generateDailyGoals = async () => {
     setIsGeneratingGoals(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-2.0-flash";
-      
-      const prompt = `Based on the following student data, generate 3-5 specific, actionable daily study goals for today.
-      Courses: ${courses.map(c => c.name).join(', ')}
-      Timetable: ${JSON.stringify(timetable)}
-      Calendar Events & Assignments: ${events.slice(0, 8).map(e => `${e.title} (${e.type}) on ${e.date}`).join(', ')}
-      Long term goal: Master all courses and excel in upcoming exams.
-      
-      Return the goals as a JSON array of objects with the following structure:
-      { "title": string, "category": "Study" | "Review" | "Practice" | "Exam" }
-      Keep titles concise and motivating. Ensure at least one goal relates to an upcoming assignment or exam if any are listed.`;
-
-      const response = await ai.models.generateContent({
-        model,
-        contents: [{ parts: [{ text: prompt }] }],
-        config: { responseMimeType: "application/json" }
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Based on the following student data, generate 3-5 specific, actionable daily study goals for today. Courses: ${courses.map(c => c.name).join(', ')}. Calendar Events: ${events.slice(0, 8).map(e => `${e.title} (${e.type}) on ${e.date}`).join(', ')}. Long term goal: Master all courses and excel in upcoming exams. Return ONLY a JSON array (no markdown): [{ "title": string, "category": "Study"|"Review"|"Practice"|"Exam" }]. Keep titles concise and motivating.`
+        })
       });
-
-      const result = JSON.parse(response.text || "[]");
+      if (!aiRes.ok) throw new Error('AI goals failed');
+      const { result: aiText } = await aiRes.json();
+      const result = parseAIJson(aiText);
       const today = new Date().toISOString().split('T')[0];
       const newGoals: DailyGoal[] = result.map((g: any) => ({
         id: Math.random().toString(36).substr(2, 9),
@@ -10210,42 +10214,7 @@ export default function App() {
     setGenerationOptionsOpen(false);
     
     try {
-      if (!process.env.GEMINI_API_KEY) {
-        throw new Error("Gemini API Key is missing. Please add GEMINI_API_KEY to your project secrets in Settings.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-2.0-flash";
-
-      // Step 1: Analyze
       setGenerationStep("Analyzing lecture materials...");
-      
-      const filePartsPromises = filteredLectures.map(async f => {
-        if (f.fileUrl) {
-          if (f.fileUrl.startsWith('data:')) {
-            const [mimeType, base64Data] = f.fileUrl.split(';base64,');
-            return {
-              inlineData: {
-                mimeType: mimeType.replace('data:', ''),
-                data: base64Data
-              }
-            };
-          } else if (f.fileUrl.startsWith('http')) {
-            const data = await fetchAsBase64(f.fileUrl);
-            if (data) {
-              return {
-                inlineData: {
-                  mimeType: data.mimeType,
-                  data: data.data
-                }
-              };
-            }
-          }
-        }
-        return { text: `Lecture File: ${f.name}` };
-      });
-
-      const fileParts = await Promise.all(filePartsPromises);
 
       const context = {
         courseName: selectedCourse.name,
@@ -10256,32 +10225,28 @@ export default function App() {
         specificTopic: generationSourceType === 'Topic' ? generationTopic : null
       };
 
+      const sourceContext = context.specificTopic
+        ? `Focus ONLY on the topic: "${context.specificTopic}" using available course context.`
+        : `Focus on the following lecture(s): ${context.lectures.join(', ')}.`;
+
+      const callAI = async (prompt: string): Promise<any[]> => {
+        const res = await fetch('/api/ai/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt })
+        });
+        if (!res.ok) throw new Error('AI generation failed');
+        const { result: text } = await res.json();
+        return parseAIJson(text);
+      };
+
       let newFlashcards: Flashcard[] = [];
       let newQuizQuestions: QuizQuestion[] = [];
       let newExamQuestions: ExamQuestion[] = [];
 
-      const sourceContext = context.specificTopic 
-        ? `Focus ONLY on the topic: "${context.specificTopic}" using available course context.`
-        : `Focus on the following lecture(s): ${context.lectures.join(', ')}.`;
-
       if (options.flashcards) {
         setGenerationStep("Generating flashcards...");
-        const flashcardPrompt = `Generate 10-15 high-quality flashcards for the course "${context.courseName}".
-        ${sourceContext}
-        Professor Style: ${context.professorStyle || 'Standard'}
-        
-        Return as a JSON array of objects: { "question": string, "answer": string, "topic": string }`;
-        
-        const response = await ai.models.generateContent({
-          model,
-          contents: [{ parts: [...fileParts, { text: flashcardPrompt }] }],
-          config: { responseMimeType: "application/json" }
-        });
-        
-        const text = response.text || "[]";
-        const jsonMatch = text.match(/\[.*\]/s);
-        const generated = JSON.parse(jsonMatch ? jsonMatch[0] : (text.startsWith('[') ? text : "[]"));
-        
+        const generated = await callAI(`Generate 10-15 high-quality flashcards for the course "${context.courseName}". ${sourceContext} Professor Style: ${context.professorStyle || 'Standard'}. Return ONLY a JSON array (no markdown): [{ "question": string, "answer": string, "topic": string }]`);
         newFlashcards = generated.map((f: any) => ({
           id: Math.random().toString(36).substr(2, 9),
           courseId: selectedCourse.id,
@@ -10296,30 +10261,7 @@ export default function App() {
 
       if (options.quiz) {
         setGenerationStep("Generating quiz questions...");
-        const quizPrompt = `Generate 5-8 high-quality quiz questions for the course "${context.courseName}".
-        ${sourceContext}
-        Professor Style: ${context.professorStyle || 'Standard'}
-        Past Exam Context: ${context.pastExams.length > 0 ? context.pastExams.join('\n') : 'No past exams provided.'}
-        Student Notes: ${context.studentNotes || 'No notes provided.'}
-        
-        CRITICAL: 
-        - Questions should be challenging and test deep understanding, not just recall.
-        - Include a mix of conceptual and practical questions.
-        - If the course involves coding, include code-related questions.
-        - If the course involves calculations, include numerical problems.
-        
-        Return as a JSON array of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": "Definition" | "Explanation" | "Comparison" | "Code" | "Calculation" | "Diagram" }`;
-        
-        const response = await ai.models.generateContent({
-          model,
-          contents: [{ parts: [...fileParts, { text: quizPrompt }] }],
-          config: { responseMimeType: "application/json" }
-        });
-        
-        const text = response.text || "[]";
-        const jsonMatch = text.match(/\[.*\]/s);
-        const generated = JSON.parse(jsonMatch ? jsonMatch[0] : (text.startsWith('[') ? text : "[]"));
-        
+        const generated = await callAI(`Generate 5-8 high-quality quiz questions for the course "${context.courseName}". ${sourceContext} Professor Style: ${context.professorStyle || 'Standard'}. Past Exams: ${context.pastExams.join('\n') || 'None'}. Student Notes: ${context.studentNotes || 'None'}. Include challenging conceptual and practical questions. Return ONLY a JSON array (no markdown): [{ "question": string, "suggestedAnswer": string, "topic": string, "type": "Definition"|"Explanation"|"Comparison"|"Code"|"Calculation"|"Diagram" }]`);
         newQuizQuestions = generated.map((q: any) => ({
           id: Math.random().toString(36).substr(2, 9),
           courseId: selectedCourse.id,
@@ -10330,29 +10272,7 @@ export default function App() {
 
       if (options.exam) {
         setGenerationStep("Generating exam simulation questions...");
-        const examPrompt = `Generate 5-8 rigorous exam-style questions for the course "${context.courseName}".
-        ${sourceContext}
-        Professor Style: ${context.professorStyle || 'Standard'}
-        Past Exam Context: ${context.pastExams.length > 0 ? context.pastExams.join('\n') : 'No past exams provided.'}
-        Student Notes: ${context.studentNotes || 'No notes provided.'}
-        
-        CRITICAL:
-        - Questions must mimic the difficulty and structure of a final university exam.
-        - Include point values (5 to 20 points per question).
-        - Ensure a mix of Theory, Explanation, and Practical (Code/Calculation) questions.
-        
-        Return as a JSON array of objects: { "question": string, "suggestedAnswer": string, "topic": string, "type": "Theory" | "Explanation" | "CodeExplanation" | "CodeWriting" | "Diagram" | "Calculation" | "MultipleChoice", "points": number }`;
-        
-        const response = await ai.models.generateContent({
-          model,
-          contents: [{ parts: [...fileParts, { text: examPrompt }] }],
-          config: { responseMimeType: "application/json" }
-        });
-        
-        const text = response.text || "[]";
-        const jsonMatch = text.match(/\[.*\]/s);
-        const generated = JSON.parse(jsonMatch ? jsonMatch[0] : (text.startsWith('[') ? text : "[]"));
-        
+        const generated = await callAI(`Generate 5-8 rigorous university exam questions for the course "${context.courseName}". ${sourceContext} Professor Style: ${context.professorStyle || 'Standard'}. Past Exams: ${context.pastExams.join('\n') || 'None'}. Include point values (5-20 pts), mix of Theory, Explanation, and Practical questions. Return ONLY a JSON array (no markdown): [{ "question": string, "suggestedAnswer": string, "topic": string, "type": "Theory"|"Explanation"|"CodeExplanation"|"CodeWriting"|"Diagram"|"Calculation"|"MultipleChoice", "points": number }]`);
         newExamQuestions = generated.map((q: any) => ({
           id: Math.random().toString(36).substr(2, 9),
           courseId: selectedCourse.id,
@@ -10386,8 +10306,8 @@ export default function App() {
       console.error("Generation failed:", error);
       const errorMessage = error.message || "Unknown error occurred";
       
-      if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("API key not valid")) {
-        setGenerationError("Invalid Gemini API Key. Please check your project secrets.");
+      if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("API key not valid") || errorMessage.includes("not configured")) {
+        setGenerationError("Invalid or missing AI API Key. Please add ANTHROPIC_API_KEY to your .env file.");
       } else if (errorMessage.includes("quota") || errorMessage.includes("429")) {
         setGenerationError("API quota exceeded. Please try again in a few minutes.");
       } else if (errorMessage.includes("safety")) {
@@ -12997,23 +12917,21 @@ export default function App() {
                           if (!importText.trim()) return;
                           setIsImportingAI(true);
                           try {
-                            const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-                            
-                            const prompt = `Extract flashcards from the following text. 
-                            Return ONLY a JSON array of objects with "question" and "answer" properties.
-                            Text: ${importText}`;
-
-                            const response = await ai.models.generateContent({
-                              model: "gemini-2.0-flash",
-                              contents: prompt,
+                            const aiRes = await fetch('/api/ai/generate', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                prompt: `Extract flashcards from the following text. Return ONLY a JSON array (no markdown) of objects with "question" and "answer" properties.\nText: ${importText}`
+                              })
                             });
-                            const text = response.text;
-                            
+                            if (!aiRes.ok) throw new Error('AI import failed');
+                            const { result: aiRawText } = await aiRes.json();
+                            const text = aiRawText;
+
                             // Extract JSON from response
                             if (text) {
-                              const jsonMatch = text.match(/\[.*\]/s);
-                              if (jsonMatch) {
-                                const parsedCards = JSON.parse(jsonMatch[0]);
+                              try {
+                                const parsedCards = parseAIJson(text);
                                 const newCards: Flashcard[] = parsedCards.map((card: any) => ({
                                   id: Math.random().toString(36).substr(2, 9),
                                   courseId: selectedCourse.id,
@@ -13031,7 +12949,7 @@ export default function App() {
                                 }
                                 setImportText('');
                                 setIsImportModalOpen(false);
-                              } else {
+                              } catch {
                                 throw new Error("Could not parse AI response");
                               }
                             } else {
